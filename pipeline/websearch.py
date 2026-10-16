@@ -14,7 +14,12 @@ import httpx
 
 from .env import get_env
 
-WEB_BANNER = "> ⚠️ 以下内容来自网络搜索，未经审核，仅供参考；与课件不一致时以课件为准。\n\n"
+# 刻意只用 GBK 也能显示的字符：这份文案会出现在学生看到的回答里，
+# 在中文 Windows 控制台或旧终端里，emoji 只会变成问号。
+WEB_BANNER = (
+    "> **注意**：以下内容来自网络搜索，未经审核，仅供参考；"
+    "与课件不一致时一律以课件为准。\n\n"
+)
 
 
 @dataclass

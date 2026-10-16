@@ -28,6 +28,13 @@ def strip_page_markers(text: str) -> str:
 FIGURE_PLACEHOLDER_RE = re.compile(r"\[\s*图\s*第?\s*(\d+)\s*页?\s*-\s*(\d+)\s*[:：][^\]]*\]")
 UNCLEAR_MARKER_RE = re.compile(r"\[此处原图不清晰\]")
 
+#: 从图上照抄回来的文字（提示词规则 4b 要求的前缀）
+FIGURE_TEXT_MARKER = "[图上文字]"
+FIGURE_TEXT_RE = re.compile(r"\[\s*图上文字\s*\]")
+
+#: 版面上当项目符号用的装饰符号。只删行首，正文里出现的一律不动。
+BULLET_GLYPHS = "◆◇●○■□▪▫★☆▲▼△▽※·•"
+
 
 # ---------------------------------------------------------------------------
 # 清洗
@@ -51,9 +58,29 @@ def normalize_markdown(text: str) -> str:
     # 模型输出 \( ... \) / \[ ... \] 时统一成 $ / $$，便于后续切块与检索
     text = text.replace("\\(", "$").replace("\\)", "$")
     text = text.replace("\\[", "$$").replace("\\]", "$$")
+    text = _strip_bullet_glyphs(text)
     text = re.sub(r"[ \t]+\n", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
+
+
+def _strip_bullet_glyphs(text: str) -> str:
+    """去掉行首当装饰用的 ◆□● 这类符号。
+
+    课件里的项目符号常常被当成正文一起转写，比如「## □ 实际电路器件种类繁多」。
+    这些符号会跟着标题进入切块元数据、再出现在引用里，属于纯噪声，
+    所以在源头清掉。**只动行首**：正文中间出现的符号可能是有意义的。
+    """
+    glyphs = re.escape(BULLET_GLYPHS)
+    heading_re = re.compile(rf"^(#{{1,6}}\s+)[{glyphs}]+\s*")
+    list_re = re.compile(rf"^(\s*(?:[-*+]|\d+\.)\s+)[{glyphs}]+\s*")
+
+    cleaned: list[str] = []
+    for line in text.splitlines():
+        line = heading_re.sub(r"\1", line)
+        line = list_re.sub(r"\1", line)
+        cleaned.append(line)
+    return "\n".join(cleaned)
 
 
 def is_probably_empty(text: str) -> bool:
@@ -89,6 +116,15 @@ def has_formula(text: str) -> bool:
 
 def count_figure_placeholders(text: str) -> int:
     return len(FIGURE_PLACEHOLDER_RE.findall(text))
+
+
+def count_figure_text_marks(text: str) -> int:
+    """统计「[图上文字]」出现了几次。
+
+    这个数字是给人工抽查用的：它代表有多少内容是从图上看出来的、
+    而不是文字层里本来就有的，也就是抽查最该盯的地方。
+    """
+    return len(FIGURE_TEXT_RE.findall(text))
 
 
 def count_unclear_marks(text: str) -> int:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import os
 import sys
 import unicodedata
 from pathlib import Path
@@ -42,17 +43,57 @@ def info(message: str) -> None:
 
 
 def configure_stdio() -> None:
-    """Windows 控制台默认按 GBK 编码输出，中文和 ✓ 会直接抛 UnicodeEncodeError。
+    """让输出编码与终端实际期望的编码一致，避免中文变乱码。
 
-    统一切到 UTF-8，并在个别字符无法编码时用替换符兜底，绝不让输出本身把程序搞崩。
+    这里踩过两次坑，都是「只在一半场景下对」：
+
+    * 不做任何处理：中文 Windows 控制台是 GBK，`✓` 这种字符会直接抛
+      UnicodeEncodeError，程序崩在打印上；
+    * 一律强制 UTF-8：直接运行时正常，但一旦 `python -m pipeline ... | Select-String`
+      这种管道，PowerShell 会按控制台代码页（GBK）去解码，中文全变乱码。
+
+    正确做法是**跟随控制台自己的输出代码页**（GetConsoleOutputCP），
+    只把无法编码的字符替换掉、绝不崩。想强制指定的话，设置 PYTHONIOENCODING 即可。
     """
+    if os.environ.get("PYTHONIOENCODING"):
+        return
+
+    encoding: str | None = None
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            codepage = ctypes.windll.kernel32.GetConsoleOutputCP()
+            if codepage:
+                encoding = "utf-8" if codepage == 65001 else f"cp{codepage}"
+        except Exception:  # pragma: no cover - 取不到就用默认
+            encoding = None
+
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
-        if reconfigure is not None:
-            try:
-                reconfigure(encoding="utf-8", errors="replace")
-            except (ValueError, OSError):  # pragma: no cover - 环境不支持时忽略
-                pass
+        if reconfigure is None:
+            continue
+        try:
+            if encoding:
+                reconfigure(encoding=encoding, errors="replace")
+            else:
+                reconfigure(errors="replace")
+        except (ValueError, OSError):  # pragma: no cover - 环境不支持时忽略
+            pass
+
+
+def marks() -> tuple[str, str]:
+    """返回（通过标记, 未通过标记）。
+
+    终端编码装不下 ✓/✗ 时自动退化成 ASCII，避免它们变成 `?` 或直接报错。
+    """
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    try:
+        for symbol in ("✓", "✗"):
+            symbol.encode(encoding)
+    except (UnicodeEncodeError, LookupError):
+        return "OK", "!!"
+    return "✓", "✗"
 
 
 def warn(message: str) -> None:
@@ -89,6 +130,30 @@ def print_table(headers: list[str], rows: list[list[str]]) -> None:
     info(render(["-" * width for width in widths]))
     for row in table:
         info(render(row))
+
+
+def summarize_failures(details: list[tuple[int, str]], *, limit: int = 3) -> None:
+    """把失败原因按内容归类后打印。
+
+    同一个原因（配额、密钥、网络）往往会让整份资料的每一页都失败，
+    逐页重复打印同一个报错反而看不出重点。
+    """
+    if not details:
+        return
+
+    groups: dict[str, list[int]] = {}
+    for page_no, error in details:
+        first_line = (error.splitlines() or [""])[0].strip() or "(没有错误信息)"
+        groups.setdefault(first_line, []).append(page_no)
+
+    warn(f"失败 {len(details)} 页，共 {len(groups)} 种原因：")
+    for index, (message, pages) in enumerate(groups.items()):
+        if index >= limit:
+            info(f"  …… 另有 {len(groups) - limit} 种原因，完整内容见 parse_errors.json")
+            break
+        shown = pages[:6]
+        suffix = "…" if len(pages) > len(shown) else ""
+        info(f"  第 {shown}{suffix} 页：{message}")
 
 
 def parse_pages(spec: str | None) -> set[int] | None:
@@ -153,6 +218,7 @@ def embed_client(settings: Settings) -> OpenAICompatClient:
 
 def cmd_doctor(settings: Settings, args: argparse.Namespace) -> int:
     problems: list[str] = []
+    ok, no = marks()
     info("=== 环境自检 ===")
     info(f"Python：{sys.version.split()[0]}（{sys.executable}）")
     info(f"项目根目录：{settings.root}")
@@ -160,12 +226,12 @@ def cmd_doctor(settings: Settings, args: argparse.Namespace) -> int:
     info("\n[配置]")
     for name in ("pipeline.yaml", "models.yaml", "retrieval.yaml", "prompts.yaml"):
         path = settings.root / "config" / name
-        info(f"  {'✓' if path.is_file() else '✗'} config/{name}")
+        info(f"  {ok if path.is_file() else no} config/{name}")
         if not path.is_file():
             problems.append(f"缺少 config/{name}")
 
     env_path = settings.root / ".env"
-    info(f"  {'✓' if env_path.is_file() else '✗'} .env（已加载 {settings.env_loaded} 项）")
+    info(f"  {ok if env_path.is_file() else no} .env（已加载 {settings.env_loaded} 项）")
     if not env_path.is_file():
         problems.append("还没有 .env，请从 .env.example 复制并填写密钥")
 
@@ -173,27 +239,27 @@ def cmd_doctor(settings: Settings, args: argparse.Namespace) -> int:
     for module in ("httpx", "yaml", "pymupdf", "PIL", "pptx"):
         try:
             importlib.import_module(module)
-            info(f"  ✓ {module}")
+            info(f"  {ok} {module}")
         except ImportError:
-            info(f"  ✗ {module}")
+            info(f"  {no} {module}")
             problems.append(f"缺少依赖 {module}，请执行 pip install -r requirements.txt")
 
     backend = str(settings.storage.get("backend", "local"))
     if backend == "postgres":
         try:
             importlib.import_module("psycopg")
-            info("  ✓ psycopg")
+            info(f"  {ok} psycopg")
         except ImportError:
-            info("  ✗ psycopg")
+            info(f"  {no} psycopg")
             problems.append("storage.backend=postgres 但缺少 psycopg，请执行 pip install 'psycopg[binary]'")
 
     info("\n[本机 Office 能力（PPT/Word → 图片）]")
     try:
         import win32com.client  # noqa: F401
 
-        info("  ✓ pywin32（可调用本机 PowerPoint / Word 导出）")
+        info(f"  {ok} pywin32（可调用本机 PowerPoint / Word 导出）")
     except ImportError:
-        info("  ✗ pywin32，PPTX 将无法导出为图片（PDF 不受影响）")
+        info(f"  {no} pywin32，PPTX 将无法导出为图片（PDF 不受影响）")
         problems.append("建议 pip install pywin32，或安装 LibreOffice 作为替代")
 
     info("\n[密钥]")
@@ -201,12 +267,12 @@ def cmd_doctor(settings: Settings, args: argparse.Namespace) -> int:
         try:
             cfg = settings.model_config(role)
         except ConfigError as exc:
-            info(f"  ✗ {role}：{exc}")
+            info(f"  {no} {role}：{exc}")
             problems.append(str(exc))
             continue
         key_env = str(cfg["api_key_env"])
         has_key = bool(get_env(key_env))
-        info(f"  {'✓' if has_key else '✗'} {role}：{cfg['name']}  ← {key_env}")
+        info(f"  {ok if has_key else no} {role}：{cfg['name']}  ← {key_env}")
         if not has_key:
             problems.append(f"{role} 缺少 {key_env}")
 
@@ -216,7 +282,7 @@ def cmd_doctor(settings: Settings, args: argparse.Namespace) -> int:
         info(f"  本地输出目录：{settings.paths.out_dir}")
     else:
         dsn = get_env("SUPABASE_DB_URL")
-        info(f"  {'✓' if dsn else '✗'} SUPABASE_DB_URL")
+        info(f"  {ok if dsn else no} SUPABASE_DB_URL")
         if not dsn:
             problems.append("storage.backend=postgres 但缺少 SUPABASE_DB_URL")
         else:
@@ -241,10 +307,10 @@ def cmd_doctor(settings: Settings, args: argparse.Namespace) -> int:
         info(f"  已登记 {len(entries)} 份资料")
         for entry in entries:
             raw = entry.local_path(settings.paths)
-            mark = "✓" if raw.is_file() else ("—" if entry.is_remote else "✗")
+            mark = ok if raw.is_file() else ("—" if entry.is_remote else no)
             info(f"    {mark} {entry.doc_key}  {entry.trust_label}  {entry.title}")
     except ManifestError as exc:
-        info(f"  ✗ {exc}")
+        info(f"  {no} {exc}")
         problems.append("资料台账有问题（见上）")
 
     info("\n=== 结论 ===")
@@ -279,6 +345,106 @@ def cmd_manifest(settings: Settings, args: argparse.Namespace) -> int:
         ],
     )
     return 0
+
+
+def cmd_keys(settings: Settings, args: argparse.Namespace) -> int:
+    """密钥体检：确认每个密钥有效、位置正确、且能访问配置里的模型。
+
+    只调用各家的 /models 列表接口，免费且不消耗额度。
+    """
+    from .keycheck import probe_key
+
+    roles = list(args.role) if args.role else ["vision", "embedding", "generate"]
+    probes = []
+    for role in roles:
+        try:
+            cfg = settings.model_config(role)
+        except ConfigError as exc:
+            fail(str(exc))
+            return 2
+        key_env = str(cfg["api_key_env"])
+        probes.append(
+            probe_key(
+                role=role,
+                key_env=key_env,
+                api_key=get_env(key_env),
+                base_url=str(cfg["base_url"]),
+                model=str(cfg["name"]),
+                timeout_s=float(args.timeout),
+            )
+        )
+
+    labels = {
+        "ok": "可用",
+        "missing": "未配置",
+        "unauthorized": "鉴权失败",
+        "not_found": "地址不对",
+        "network": "网络不通",
+        "error": "调用出错",
+        "unknown": "未知",
+    }
+    print_table(
+        ["用途", "密钥变量", "结果", "说明"],
+        [
+            [probe.role, probe.key_env, labels.get(probe.status, probe.status), probe.detail]
+            for probe in probes
+        ],
+    )
+
+    for probe in probes:
+        if probe.notes:
+            info("")
+            info(f"[{probe.role}] {probe.key_env}")
+            for note in probe.notes:
+                info(f"  · {note}")
+
+    if args.list:
+        keyword = (args.grep or "").lower()
+        for probe in probes:
+            if not probe.all_models:
+                continue
+            names = [item for item in probe.all_models if keyword in item.lower()]
+            if keyword and not names:
+                info("")
+                info(
+                    f"[{probe.role}] {probe.key_env}："
+                    f"{len(probe.all_models)} 个可用模型里没有名字含 {args.grep!r} 的。"
+                )
+                continue
+            info("")
+            title = f"[{probe.role}] {probe.key_env} 的可用模型"
+            if keyword:
+                title += (
+                    f"（含 {args.grep!r} 的，共 {len(names)} / {len(probe.all_models)} 个）"
+                )
+            else:
+                title += f"（共 {len(probe.all_models)} 个）"
+            info(title + "：")
+            for model_name in names:
+                info(f"    {model_name}")
+
+    info("")
+    broken = [probe for probe in probes if probe.status != "ok"]
+    wrong_model = [probe for probe in probes if probe.model_missing]
+
+    if not broken and not wrong_model:
+        info("密钥有效、模型名也都对得上，可以开始建库。")
+        return 0
+
+    if not broken and wrong_model:
+        info("密钥全部有效，问题只在模型名——不解决的话，建库会在解析阶段整份失败：")
+        for probe in wrong_model:
+            target = (
+                "、".join(probe.suggestions)
+                if probe.suggestions
+                else "（列表里没有相近的模型）"
+            )
+            info(f"  · {probe.role}：不用 {probe.model!r}，改用 {target}")
+        info("改 config/models.yaml 里对应的 name，改完再跑一次本命令确认。")
+        return 1
+
+    info("上面标了「未配置 / 鉴权失败 / 网络不通」的都要先解决，再往下走。")
+    return 1
 
 
 def cmd_register(settings: Settings, args: argparse.Namespace) -> int:
@@ -422,8 +588,7 @@ def cmd_parse(settings: Settings, args: argparse.Namespace) -> int:
         info(f"{entry.doc_key}：{report.summary()}")
         if missing:
             warn(f"{entry.doc_key}：仍有 {len(missing)} 页没有解析结果 {missing[:10]}")
-        for page in report.failures:
-            warn(f"{entry.doc_key} 第 {page.page_no} 页：{page.error}")
+        summarize_failures([(page.page_no, page.error or "") for page in report.failures])
     client.close()
     return exit_code
 
@@ -544,6 +709,12 @@ def cmd_run(settings: Settings, args: argparse.Namespace) -> int:
 
         for message in summary.warnings:
             warn(message)
+        summarize_failures(summary.failure_details)
+        if summary.parsed_pages and summary.failed_pages == summary.parsed_pages:
+            warn(
+                "本份资料「全部页」都失败，这不是单页问题——"
+                "优先查密钥、账号额度与网络，而不是去挑某一页。"
+            )
         if summary.skipped_stages:
             warn(f"{entry.doc_key}：已跳过 {'、'.join(summary.skipped_stages)}")
         info(
@@ -699,6 +870,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("doctor", help="环境与配置自检（不联网、不花钱）")
 
+    p = sub.add_parser("keys", help="密钥体检：确认密钥有效、位置正确（免费接口，不消耗额度）")
+    p.add_argument(
+        "--role",
+        action="append",
+        choices=("vision", "embedding", "generate"),
+        help="只查某一类，可重复；默认三类都查",
+    )
+    p.add_argument("--timeout", type=float, default=25.0, help="单个请求超时秒数")
+    p.add_argument("--list", action="store_true", help="顺带列出每个平台可用的全部模型名")
+    p.add_argument("--grep", help="与 --list 搭配：只列出名字里含该关键字的模型")
+
     p = sub.add_parser("manifest", help="查看并校验资料台账")
     p.add_argument("--course", help="只看某门课")
 
@@ -766,6 +948,7 @@ def main(argv: list[str] | None = None) -> int:
 
     handlers = {
         "doctor": cmd_doctor,
+        "keys": cmd_keys,
         "manifest": cmd_manifest,
         "register": cmd_register,
         "render": cmd_render,

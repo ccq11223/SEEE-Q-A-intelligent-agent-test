@@ -44,6 +44,7 @@ class RunSummary:
     loaded: int = 0
     skipped_stages: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    failure_details: list[tuple[int, str]] = field(default_factory=list)
     sample_report: Path | None = None
 
 
@@ -210,6 +211,9 @@ def run_document(
     )
     summary.parsed_pages = len(report.pages)
     summary.failed_pages = len(report.failures)
+    summary.failure_details = [
+        (page.page_no, page.error or "") for page in report.failures
+    ]
     log(f"  [3/6] 解析完成：{report.summary()}")
 
     _, missing = write_combined_markdown(settings, entry, rendered.page_count)
@@ -235,6 +239,23 @@ def run_document(
             "确认要按现有页入库，请加 --allow-partial。"
         )
         return summary
+
+    # ---- 质量闸门：解析大面积失败时不许切块入库 ----
+    # 这一条拦的是「密钥失效 / 没有额度」这类原因：那种情况下每一页都会失败，
+    # 而页文件其实是写出来了的（内容是失败标记），所以上面的「缺页」检查拦不住。
+    max_ratio = float(
+        (settings.pipeline.get("quality_gate") or {}).get("max_failure_ratio", 0.1)
+    )
+    if summary.parsed_pages and summary.failed_pages:
+        ratio = summary.failed_pages / summary.parsed_pages
+        if ratio > max_ratio and not options.allow_partial:
+            summary.skipped_stages.append("chunk/embed/load")
+            summary.warnings.append(
+                f"已解析的 {summary.parsed_pages} 页里有 {summary.failed_pages} 页失败"
+                f"（{ratio:.0%}，超过质量闸门 {max_ratio:.0%}），已跳过切块与入库。"
+                f"先按上面的失败原因修好，再重跑；确实要带着失败页入库才加 --allow-partial。"
+            )
+            return summary
 
     # ---- 步骤 5：切块 ----
     chunks = run_chunking(settings, entry)

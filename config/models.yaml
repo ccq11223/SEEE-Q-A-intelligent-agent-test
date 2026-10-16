@@ -2,7 +2,10 @@
 # 换服务商只需改 base_url / name / api_key_env 三处，代码不用动。
 
 vision:
-  name: qwen-vl-max-latest
+  # 实测：该账号 176 个可用模型里没有 qwen-vl-max / -latest，
+  # 含 vl 的只有 qwen3-vl-plus、qwen-vl-ocr、qwen-vl-ocr-2025-11-20。
+  # qwen3-vl-plus 是通用多模态模型，公式与版式理解比纯 OCR 模型更适合本任务。
+  name: qwen3-vl-plus
   base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
   api_key_env: DASHSCOPE_API_KEY
   max_tokens: 4096
@@ -17,7 +20,9 @@ embedding:
   timeout_s: 120
 
 generate:
-  name: deepseek-chat
+  # 实测：该 deepseek 账号的可用模型列表里没有 deepseek-chat，只有 v4 系列。
+  # 换账号或换服务商时，先跑 python -m pipeline keys 确认模型名。
+  name: deepseek-flash
   base_url: https://api.deepseek.com/v1
   api_key_env: DEEPSEEK_API_KEY
   max_tokens: 1500

@@ -99,6 +99,45 @@ class OpenAICompatClient:
             "Content-Type": "application/json",
         }
 
+    @staticmethod
+    def _error_detail(response: httpx.Response, limit: int = 600) -> str:
+        """尽量抽出服务商返回里真正有用的那句话。
+
+        OpenAI 兼容接口的报错通常长这样：
+            {"error": {"message": "Access denied. ...", "code": "..."}}
+        直接打印整段 JSON 会让人抓不到重点，而且关键信息常被截断在末尾。
+        """
+        raw = (response.text or "").strip()
+        try:
+            payload = response.json()
+        except ValueError:
+            return raw[:limit] or "(服务端没有返回内容)"
+
+        message: object = None
+        if isinstance(payload, dict):
+            error = payload.get("error")
+            if isinstance(error, dict):
+                message = error.get("message") or error.get("code")
+            elif isinstance(error, str):
+                message = error
+            if not message:
+                message = payload.get("message") or payload.get("code")
+
+        if isinstance(message, str) and message.strip():
+            return message.strip()[:limit]
+        return raw[:limit] or "(服务端没有返回可读的错误信息)"
+
+    def _rejection_hint(self) -> str:
+        return (
+            f"排查顺序：\n"
+            f"  1) 运行 python -m pipeline keys。它能区分「密钥无效」和「密钥有效但模型名不可用」——"
+            f"后者同样返回 403，报错看起来像权限问题，实际是模型名对不上。\n"
+            f"  2) 确认 {self.config.api_key_env} 是在国内站创建、状态为「启用」"
+            f"（国际站的密钥不能用于国内站点）；\n"
+            f"  3) 确认账号已开通 name={self.config.name!r} 这个模型、且没有欠费；\n"
+            f"  4) 核对 base_url={self.config.base_url!r} 与上面的密钥是否配套。"
+        )
+
     def _post(self, endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
         url = f"{self.config.base_url}{endpoint}"
         last_error: Exception | None = None
@@ -119,8 +158,7 @@ class OpenAICompatClient:
                 else:
                     raise LLMError(
                         f"{self.config.role} 调用被拒绝（HTTP {response.status_code}）："
-                        f"{response.text[:400]}\n"
-                        f"请核对 config/models.yaml 里的 name/base_url 与 {self.config.api_key_env} 是否匹配。"
+                        f"{self._error_detail(response)}\n{self._rejection_hint()}"
                     )
 
             if attempt < self.retry:

@@ -21,6 +21,7 @@ from .manifest import ManifestEntry
 from .settings import Settings
 from .textutils import (
     count_figure_placeholders,
+    count_figure_text_marks,
     count_unclear_marks,
     has_formula,
     is_probably_empty,
@@ -38,6 +39,7 @@ class PageParse:
     error: str | None = None
     has_formula: bool = False
     figure_count: int = 0
+    figure_text_count: int = 0
     unclear_count: int = 0
 
     @property
@@ -61,10 +63,12 @@ class ParseReport:
         total = len(self.pages)
         formula = sum(1 for page in self.pages if page.has_formula)
         figures = sum(page.figure_count for page in self.pages)
+        figure_texts = sum(page.figure_text_count for page in self.pages)
         unclear = sum(page.unclear_count for page in self.pages)
         return (
             f"共 {total} 页｜缓存命中 {self.cached_count} 页｜含公式 {formula} 页｜"
-            f"图片占位 {figures} 个｜不清晰标记 {unclear} 处｜失败 {len(self.failures)} 页"
+            f"图片占位 {figures} 个｜图上文字 {figure_texts} 处｜"
+            f"不清晰标记 {unclear} 处｜失败 {len(self.failures)} 页"
         )
 
 
@@ -200,6 +204,7 @@ def annotate_page(result: PageParse) -> None:
     """补齐一页的统计字段（缓存命中与失败重建时都要用）。"""
     result.has_formula = has_formula(result.markdown)
     result.figure_count = count_figure_placeholders(result.markdown)
+    result.figure_text_count = count_figure_text_marks(result.markdown)
     result.unclear_count = count_unclear_marks(result.markdown)
 
 
@@ -267,13 +272,27 @@ def parse_document(
         report.pages.append(page)
         body = page.markdown
         if page.error:
-            body = f"[本页解析失败：{page.error.splitlines()[0][:120]}]"
+            body = f"[本页解析失败：{page.error.splitlines()[0][:300]}]"
         (pages_dir / f"{entry.doc_key}_page_{page_no:04d}.md").write_text(
             body, encoding="utf-8"
         )
         parts.append(page_marker(page_no))
         if body:
             parts.append(body)
+
+    # 失败详情另存一份完整版：页文件里的标记会被截断，排查时不方便
+    errors_path = settings.paths.doc_work(entry.doc_key) / "parse_errors.json"
+    errors_path.write_text(
+        json.dumps(
+            [
+                {"page_no": page.page_no, "source": page.source, "error": page.error}
+                for page in report.failures
+            ],
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
 
     return report, "\n\n".join(parts).strip() + "\n"
 
