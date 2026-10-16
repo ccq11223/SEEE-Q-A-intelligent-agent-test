@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
 from pipeline.chunker import Chunk, ChunkConfig, chunk_document
-from pipeline.embedder import EmbeddingDimError, embed_chunks
+from pipeline.embedder import (
+    EmbeddingDimError,
+    embed_chunks,
+    load_cached_embeddings,
+    save_embeddings,
+)
 from pipeline.store import ChunkRecord, DocumentRecord, LocalStore, vector_literal
 from pipeline.textutils import page_marker
 from tests.support import FakeEmbedder
@@ -28,6 +34,69 @@ def sample_chunks() -> list[Chunk]:
         doc_key="doc-x",
         config=ChunkConfig(target_chars=120, max_chars=200, min_chars=40, overlap_chars=0),
     )
+
+
+class TestEmbeddingCache(unittest.TestCase):
+    """向量要能复用：换存储后端时不该为同一批文本再付一次钱。"""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmp.name) / "embeddings.jsonl"
+        self.chunks = sample_chunks()
+        self.vectors = embed_chunks(self.chunks, FakeEmbedder(), expected_dim=5)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_roundtrip_reuses_vectors(self) -> None:
+        save_embeddings(self.path, self.chunks, self.vectors)
+        loaded, note = load_cached_embeddings(self.path, self.chunks)
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded, self.vectors)
+        self.assertIn("内容指纹", note)
+
+    def test_content_change_invalidates_cache(self) -> None:
+        save_embeddings(self.path, self.chunks, self.vectors)
+        changed = list(self.chunks)
+        changed[0] = Chunk(
+            chunk_key=changed[0].chunk_key,
+            page_no=changed[0].page_no,
+            page_end=changed[0].page_end,
+            chapter=changed[0].chapter,
+            section_title=changed[0].section_title,
+            content=changed[0].content + "（改过）",
+            char_count=changed[0].char_count,
+            token_count=changed[0].token_count,
+        )
+        loaded, note = load_cached_embeddings(self.path, changed)
+        self.assertIsNone(loaded)
+        self.assertIn("变过", note)
+
+    def test_count_mismatch_invalidates_cache(self) -> None:
+        save_embeddings(self.path, self.chunks, self.vectors)
+        loaded, note = load_cached_embeddings(self.path, self.chunks[:-1])
+        self.assertIsNone(loaded)
+        self.assertIn("对不上", note)
+
+    def test_missing_file_reports_cleanly(self) -> None:
+        loaded, note = load_cached_embeddings(self.path, self.chunks)
+        self.assertIsNone(loaded)
+        self.assertIn("没有缓存", note)
+
+    def test_legacy_bare_list_format_is_reused_with_a_warning(self) -> None:
+        # 老版程序写的是每行一个裸数组，没有指纹可比
+        self.path.write_text(
+            "\n".join(json.dumps(v) for v in self.vectors) + "\n", encoding="utf-8"
+        )
+        loaded, note = load_cached_embeddings(self.path, self.chunks)
+        self.assertIsNotNone(loaded)
+        self.assertIn("旧格式", note)
+
+    def test_corrupt_file_invalidates_cache(self) -> None:
+        self.path.write_text("这不是 JSON", encoding="utf-8")
+        loaded, note = load_cached_embeddings(self.path, self.chunks)
+        self.assertIsNone(loaded)
+        self.assertTrue(note)
 
 
 class TestVectorLiteral(unittest.TestCase):

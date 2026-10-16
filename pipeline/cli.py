@@ -726,7 +726,7 @@ def cmd_load(settings: Settings, args: argparse.Namespace) -> int:
         store.close()
         return 1
 
-    from .embedder import embed_chunks
+    from .embedder import embed_chunks, load_cached_embeddings, save_embeddings
     from .store import ChunkRecord, DocumentRecord
 
     for entry in entries:
@@ -739,26 +739,32 @@ def cmd_load(settings: Settings, args: argparse.Namespace) -> int:
         if not chunks:
             warn(f"{entry.doc_key}：切块结果为空，跳过。")
             continue
-        try:
-            vectors = embed_chunks(
-                chunks,
-                client,
-                batch_size=int(settings.embedding.get("batch_size", 32)),
-                expected_dim=int(settings.embedding.get("dim", 0)) or None,
-                progress=lambda done, total: (
-                    info(f"  向量化 {done}/{total} 块")
-                    if (done % 40 == 0 or done == total)
-                    else None
-                ),
-            )
-        except LLMError as exc:
-            fail(f"{entry.doc_key}：向量化失败 {exc}")
-            exit_code = 1
-            continue
-
-        settings.paths.doc_embeddings(entry.doc_key).write_text(
-            "\n".join(json.dumps(vector) for vector in vectors) + "\n", encoding="utf-8"
-        )
+        emb_path = settings.paths.doc_embeddings(entry.doc_key)
+        vectors, note = load_cached_embeddings(emb_path, chunks)
+        if vectors is not None:
+            info(f"  {note}，不重复调用向量模型")
+        else:
+            info(f"  需要重新向量化（{note}）")
+            try:
+                vectors = embed_chunks(
+                    chunks,
+                    client,
+                    batch_size=int(settings.embedding.get("batch_size", 32)),
+                    expected_dim=int(settings.embedding.get("dim", 0)) or None,
+                    progress=lambda done, total: (
+                        info(f"  向量化 {done}/{total} 块")
+                        if (done % 40 == 0 or done == total)
+                        else None
+                    ),
+                )
+            except LLMError as exc:
+                fail(f"{entry.doc_key}：向量化失败 {exc}")
+                exit_code = 1
+                continue
+        # 无论复用还是新算，都按带内容指纹的新格式重存一次：
+        # 旧格式（每行一个裸数组）没有指纹，内容改了但条数没变时察觉不到，
+        # 复用一次之后就自动升级，下次比对就能逐条核对。
+        save_embeddings(emb_path, chunks, vectors)
         records = [
             ChunkRecord.from_chunk(chunk, trust_level=entry.trust_level, embedding=vector)
             for chunk, vector in zip(chunks, vectors)

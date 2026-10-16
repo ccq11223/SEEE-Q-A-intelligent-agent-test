@@ -14,7 +14,7 @@ from typing import Callable
 from .ai_parser import parse_document
 from .chunker import Chunk, ChunkConfig, chunk_document
 from .convert import PageAsset, RenderedDoc, render_document
-from .embedder import embed_chunks
+from .embedder import embed_chunks, load_cached_embeddings, save_embeddings
 from .llm import OpenAICompatClient
 from .manifest import ManifestEntry
 from .settings import Settings
@@ -277,24 +277,26 @@ def run_document(
         return summary
 
     # ---- 步骤 6：向量化 ----
-    vectors = embed_chunks(
-        chunks,
-        embed_client,
-        batch_size=int(settings.embedding.get("batch_size", 32)),
-        expected_dim=int(settings.embedding.get("dim", 0)) or None,
-        progress=lambda done, total: (
-            log(f"  [6/6] 向量化 {done}/{total} 块")
-            if (done % 40 == 0 or done == total)
-            else None
-        ),
-    )
+    emb_path = settings.paths.doc_embeddings(entry.doc_key)
+    vectors, note = load_cached_embeddings(emb_path, chunks)
+    if vectors is not None:
+        log(f"  [6/6] {note}，跳过向量模型调用")
+    else:
+        vectors = embed_chunks(
+            chunks,
+            embed_client,
+            batch_size=int(settings.embedding.get("batch_size", 32)),
+            expected_dim=int(settings.embedding.get("dim", 0)) or None,
+            progress=lambda done, total: (
+                log(f"  [6/6] 向量化 {done}/{total} 块")
+                if (done % 40 == 0 or done == total)
+                else None
+            ),
+        )
+    # 复用或新算都按带指纹的新格式重存，让下次比对能逐条核对内容
+    save_embeddings(emb_path, chunks, vectors)
     summary.embedded = len(vectors)
     log(f"  [6/6] 向量化完成：{len(vectors)} 条")
-
-    emb_path = settings.paths.doc_embeddings(entry.doc_key)
-    emb_path.write_text(
-        "\n".join(json.dumps(vector) for vector in vectors) + "\n", encoding="utf-8"
-    )
 
     if options.dry_run:
         summary.skipped_stages.append("load")
