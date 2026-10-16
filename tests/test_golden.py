@@ -20,6 +20,7 @@ from pipeline.golden import (
     describe_hits,
     load_cases,
     pages_from_hits,
+    point_covered,
     render_report,
     summarize_cases,
 )
@@ -189,6 +190,93 @@ class TestCaseVerdicts(unittest.TestCase):
     def test_retrieval_only_mode_does_not_judge_fabrication(self) -> None:
         # 没调用生成模型，mode 为空，不能拿它判编造
         self.assertFalse(self.negative(mode="").fabricated)
+
+
+class TestPointCoverage(unittest.TestCase):
+    """要点覆盖率是唯一能发现「页码引用正确、但结论说反了」的自动指标。"""
+
+    def test_matches_rewritten_wording(self) -> None:
+        # 题集里写「必须保证唯一解」，模型答成「要保证唯一解」
+        self.assertTrue(point_covered("必须保证唯一解", "替代前后都要保证唯一解（第 25 页）。"))
+
+    def test_detects_a_missing_point(self) -> None:
+        self.assertFalse(
+            point_covered("不能出现电压源回路", "替代定理适用于线性电路和非线性电路")
+        )
+
+    def test_ignores_punctuation_and_latex_marks(self) -> None:
+        self.assertTrue(
+            point_covered("原电路与替代后电路都必须有唯一解", "原电路、替代后的电路，都必须有唯一解。")
+        )
+
+    def test_short_points_use_substring(self) -> None:
+        self.assertTrue(point_covered("唯一解", "要保证唯一解"))
+        self.assertFalse(point_covered("唯一解", "要保证解的个数不限"))
+
+    def test_empty_point_is_ignored(self) -> None:
+        self.assertTrue(point_covered("   ", "任意回答"))
+
+    def test_case_result_counts_hit_and_missed(self) -> None:
+        case = GoldenCase(
+            id="p1",
+            question="q",
+            expect_pages=[1],
+            expect_points=["必须有唯一解", "不能出现电压源回路"],
+        )
+        result = CaseResult(
+            case=case,
+            mode="kb",
+            citation_valid=True,
+            points_hit=["必须有唯一解"],
+            points_missed=["不能出现电压源回路"],
+        )
+        self.assertAlmostEqual(result.point_rate, 0.5)
+
+    def test_point_rate_is_one_when_no_points_written(self) -> None:
+        case = GoldenCase(id="p1", question="q", expect_pages=[1])
+        self.assertEqual(CaseResult(case=case, mode="kb").point_rate, 1.0)
+
+    def test_report_lists_low_coverage_cases(self) -> None:
+        case = GoldenCase(
+            id="p1",
+            question="替代定理的适用条件",
+            expect_pages=[25],
+            expect_points=["不能出现电压源回路"],
+        )
+        report = GoldenReport(
+            results=[
+                CaseResult(
+                    case=case,
+                    mode="kb",
+                    citation_valid=True,
+                    hit_pages=[25],
+                    front_pages=[25],
+                    citations=[25],
+                    points_missed=["不能出现电压源回路"],
+                )
+            ]
+        )
+        text = render_report(
+            report,
+            thresholds={"hit_rate": 0.8, "fabrication_rate": 0.05},
+            generated_at="now",
+        )
+        self.assertIn("要点覆盖偏低", text)
+        self.assertIn("不能出现电压源回路", text)
+
+    def test_report_average_only_counts_answered_cases(self) -> None:
+        # 转人工的题不该把要点覆盖率的均值拉低
+        case_ok = GoldenCase(id="p1", question="q", expect_pages=[1], expect_points=["甲要点"])
+        case_handoff = GoldenCase(
+            id="p2", question="q", expect_pages=[2], expect_points=["乙要点"]
+        )
+        report = GoldenReport(
+            results=[
+                CaseResult(case=case_ok, mode="kb", points_hit=["甲要点"]),
+                CaseResult(case=case_handoff, mode="handoff", points_missed=["乙要点"]),
+            ]
+        )
+        self.assertEqual(report.point_rate, 1.0)
 
 
 class TestReportMetrics(unittest.TestCase):

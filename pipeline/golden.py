@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -29,6 +30,38 @@ from .store import Store
 from .textutils import mentions_missing_coverage
 
 VALID_STATUS = ("draft", "ready")
+
+#: 比对「要点有没有被答到」时抹掉的符号：空白、标点、LaTeX 与 Markdown 标记。
+#: 学生的回答和题集里写的要点措辞必然不同，不归一化就全是误报。
+_POINT_NORM_RE = re.compile(r"[\s，,。.；;：:!！?？（）()【】\[\]$\\{}\^_*#`~“”\"']+")
+
+#: 要点被改写时允许的差异程度：3-gram 重合到这个比例就算答到了。
+#: 定得宽松是有意的——这一项是「提醒你去看」的信号，不是判定对错的裁判。
+POINT_MATCH_RATIO = 0.5
+
+
+def _norm_point(text: str) -> str:
+    return _POINT_NORM_RE.sub("", text).lower()
+
+
+def point_covered(point: str, answer_key: str) -> bool:
+    """回答里是否答到了这个要点。
+
+    用 3-gram 重合率而不是整串匹配：模型会把要点改写成自己的话
+    （「必须有唯一解」答成「要保证解是唯一的」），逐字比对会全是误报。
+
+    **能力边界**：它擅长发现「整个要点根本没答到」，对「答到了但某个字写错」
+    不敏感。回答是被约束在课件原文上生成的，措辞通常与原文高度重合，
+    所以真的差得远时，说明那个要点压根没出现。
+    """
+    key = _norm_point(point)
+    if not key:
+        return True
+    if len(key) < 4:
+        return key in answer_key
+    grams = [key[index : index + 3] for index in range(len(key) - 2)]
+    hits = sum(1 for gram in grams if gram in answer_key)
+    return hits / len(grams) >= POINT_MATCH_RATIO
 
 
 class GoldenError(ValueError):
@@ -171,12 +204,17 @@ class CaseResult:
     front_pages: list[int] = field(default_factory=list)
     #: 按相关度排序的前几条，形如 [("第25-26页", 0.687), ...]，用于报告和终端显示
     top_hits: list[tuple[str, float]] = field(default_factory=list)
+    #: 期望的结论要点里，回答答到了哪些、漏了哪些
+    points_hit: list[str] = field(default_factory=list)
+    points_missed: list[str] = field(default_factory=list)
     mode: str = ""
     citations: list[int] = field(default_factory=list)
     citation_valid: bool = True
     latency_ms: int = 0
     error: str = ""
     answer: str = ""
+    #: 决策链给出的说明（为什么转人工、引用为什么没通过），排查时最关键的一行
+    note: str = ""
 
     @property
     def retrieval_hit(self) -> bool:
@@ -200,6 +238,20 @@ class CaseResult:
     def answered(self) -> bool:
         """正样本是否给出了带有效引用的回答。"""
         return self.mode == "kb" and self.citation_valid
+
+    @property
+    def point_rate(self) -> float:
+        """要点覆盖率：回答把期望的结论要点答到了多少。
+
+        这是唯一能发现「页码引用正确、但结论说反了」的自动指标。
+        它不参与达标判定（措辞差异会让它天然偏低），只作为「去人工看一眼」的信号。
+        """
+        if self.case.negative or not self.case.expect_points:
+            return 1.0
+        total = len(self.points_hit) + len(self.points_missed)
+        if not total:
+            return 1.0
+        return len(self.points_hit) / total
 
     @property
     def handed_off(self) -> bool:
@@ -304,6 +356,18 @@ class GoldenReport:
             return 1.0
         return sum(1 for item in self.negative if item.handed_off) / len(self.negative)
 
+    @property
+    def point_rate(self) -> float:
+        """要点覆盖率。只统计「真的给出了回答」的题，否则转人工会把均值拉低。"""
+        graded = [
+            item
+            for item in self.results
+            if not item.case.negative and item.case.expect_points and item.mode == "kb"
+        ]
+        if not graded:
+            return 1.0
+        return sum(item.point_rate for item in graded) / len(graded)
+
 
 def run_case(
     case: GoldenCase,
@@ -338,6 +402,14 @@ def run_case(
             result.citations = list(answer.citations)
             result.citation_valid = answer.citation_valid
             result.answer = answer.text
+            result.note = answer.note
+            if case.expect_points:
+                answer_key = _norm_point(answer.text)
+                for point in case.expect_points:
+                    if point_covered(point, answer_key):
+                        result.points_hit.append(point)
+                    else:
+                        result.points_missed.append(point)
     except LLMError as exc:
         result.error = str(exc)
     result.latency_ms = int((time.perf_counter() - started) * 1000)
@@ -413,6 +485,9 @@ def render_report(
     )
     if not report.retrieval_only:
         lines.append(f"| 回答可用率 | {report.answer_rate:.0%} | 观察项 | — |")
+        lines.append(
+            f"| 要点覆盖率 | {report.point_rate:.0%} | 观察项 | — |"
+        )
         lines.append(f"| 负样本转人工率 | {report.handoff_rate:.0%} | 观察项 | — |")
     lines.append("")
     lines.extend(
@@ -420,9 +495,33 @@ def render_report(
             "> 检索命中率 = 期望页码出现在**召回的全部 20 条**里；"
             "前置命中率 = 出现在**真正交给模型的前 5 条**里。",
             "> 两者差距大说明召回没问题但排序有问题，往往比命中率本身更值得调。",
+            ">",
+            "> **要点覆盖率**是唯一能发现「页码引用正确、但结论说反了」的指标。"
+            "它不参与达标判定（模型会改写措辞，天然有些对不上），"
+            "低于 60% 就该人工打开回答看一眼。",
             "",
         ]
     )
+
+    low_points = [
+        item
+        for item in report.results
+        if not item.case.negative
+        and item.case.expect_points
+        and item.mode == "kb"
+        and item.point_rate < 0.6
+    ]
+    if low_points:
+        lines.extend(["## 要点覆盖偏低（去人工看一眼回答）", ""])
+        for item in low_points:
+            lines.append(f"### {item.case.id}：{item.case.question}")
+            lines.append("")
+            lines.append(f"- 要点覆盖率 {item.point_rate:.0%}，引用页码 {item.citations}")
+            for point in item.points_missed:
+                lines.append(f"  - ❌ 没答到：{point}")
+            for point in item.points_hit:
+                lines.append(f"  - ✅ 答到了：{point}")
+            lines.append("")
 
     problems = [item for item in report.results if item.error]
     fabricated = [item for item in report.results if item.fabricated]
@@ -452,6 +551,26 @@ def render_report(
                 f"- `{item.case.id}`：期望第 {item.case.expect_pages} 页，"
                 f"前几条命中的是 {_format_top_hits(item)}"
                 f"　{item.case.question}"
+            )
+        lines.append("")
+
+    unanswered = [
+        item
+        for item in report.positive
+        if not item.error and item.mode != "kb"
+    ]
+    if unanswered and not report.retrieval_only:
+        lines.extend(
+            [
+                "## 正样本没能作答（检索到了依据、但没给出可用回答）",
+                "",
+                "这类问题检索是对的，卡在后面一步。原因写在下面：",
+                "",
+            ]
+        )
+        for item in unanswered:
+            lines.append(
+                f"- `{item.case.id}`（模式 `{item.mode}`）：{item.note or '（没有说明）'}"
             )
         lines.append("")
 

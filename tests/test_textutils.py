@@ -78,6 +78,26 @@ class TestCitation(unittest.TestCase):
     def test_ignores_step_numbers(self) -> None:
         self.assertEqual(extract_citation_pages("第一步：写出方程；第二步：求解。"), [])
 
+    def test_extracts_comma_separated_pages(self) -> None:
+        # 实测模型常写这种合并形式，早期解析不出来会导致假转人工
+        self.assertEqual(extract_citation_pages("见（第 25、26 页）。"), [25, 26])
+
+    def test_extracts_page_range(self) -> None:
+        self.assertEqual(extract_citation_pages("见（第25-26页）。"), [25, 26])
+        self.assertEqual(extract_citation_pages("第 30 至 32 页"), [30, 31, 32])
+        self.assertEqual(extract_citation_pages("第25~27页"), [25, 26, 27])
+
+    def test_mixed_forms_are_merged_and_deduped(self) -> None:
+        text = "（第 25、26 页）……（第 26 页）……（第 41-42 页）"
+        self.assertEqual(extract_citation_pages(text), [25, 26, 41, 42])
+
+    def test_absurd_range_is_not_expanded(self) -> None:
+        # 「第25-9999页」明显是笔误，不该展开成几千个页码
+        self.assertEqual(extract_citation_pages("第25-9999页"), [25, 9999])
+
+    def test_does_not_mistake_other_numbers_for_pages(self) -> None:
+        self.assertEqual(extract_citation_pages("共 3 个条件，第 25 页有说明"), [25])
+
     def test_validate_passes_when_all_pages_exist(self) -> None:
         ok, invalid = validate_citations("见（第 2 页）和（第 5 页）", {2, 5, 9})
         self.assertTrue(ok)

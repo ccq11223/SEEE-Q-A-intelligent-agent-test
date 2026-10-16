@@ -700,6 +700,8 @@ def cmd_golden(settings: Settings, args: argparse.Namespace) -> int:
                 f"（期望第 {case.expect_pages} 页）"
             )
             info(f"        最相关的几条：{shown}")
+            if result.note:
+                info(f"        说明：{result.note}")
         if result.error:
             warn(f"      运行出错：{result.error.splitlines()[0]}")
 
@@ -744,6 +746,7 @@ def cmd_golden(settings: Settings, args: argparse.Namespace) -> int:
     if not args.only_retrieval:
         info(f"编造率：{report.fabrication_rate:.0%}（目标 ≤ {args.max_fabrication_rate:.0%}）")
         info(f"回答可用率：{report.answer_rate:.0%}｜负样本转人工率：{report.handoff_rate:.0%}")
+        info(f"要点覆盖率：{report.point_rate:.0%}（低于 60% 就该人工打开回答看）")
     info(f"报告：{report_path}")
 
     fabricated = [item for item in report.results if item.fabricated]

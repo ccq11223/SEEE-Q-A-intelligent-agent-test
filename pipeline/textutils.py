@@ -147,21 +147,57 @@ def split_sentences(text: str) -> list[str]:
 # 引用校验：回答里出现的页码必须真实存在于检索结果中
 # ---------------------------------------------------------------------------
 
-_CITATION_PATTERNS = (
-    re.compile(r"第\s*(\d{1,4})\s*页"),
+#: 引用页码的几种写法。**必须支持合并写法**，否则会漏判：
+#: 实测模型经常写「（第25、26页）」「（第25-26页）」，而早期只认「第25页」，
+#: 结果明明引用了正确页码却被判成「一个页码都没写」→ 假转人工。
+_CITATION_BLOCK_RE = re.compile(
+    r"第\s*(\d{1,4}(?:\s*[、,，/~\-—至]\s*\d{1,4})*)\s*页"
+)
+_CITATION_RANGE_RE = re.compile(r"(\d{1,4})\s*[~\-—至]\s*(\d{1,4})")
+_CITATION_NUMBER_RE = re.compile(r"\d{1,4}")
+
+#: 区间展开的上限：写「第25-9999页」这种明显是笔误，不要展开成几千个页码
+_MAX_RANGE_SPAN = 80
+
+_OTHER_CITATION_PATTERNS = (
     re.compile(r"页码\s*[:：]\s*(\d{1,4})"),
     re.compile(r"(?<![\w.])(?:[pP]\.)\s*(\d{1,4})(?!\d)"),
 )
 
 
 def extract_citation_pages(text: str) -> list[int]:
-    """按出现顺序抽出回答中声明的页码，去重。"""
+    """按出现顺序抽出回答中声明的页码，去重。
+
+    支持四种写法：「第25页」「第25、26页」「第25-26页」「第25至28页」。
+    合并写法很常见，解析漏了会直接造成假转人工。
+    """
     seen: list[int] = []
-    for pattern in _CITATION_PATTERNS:
+
+    def record(page: int) -> None:
+        if page > 0 and page not in seen:
+            seen.append(page)
+
+    for block in _CITATION_BLOCK_RE.finditer(text):
+        body = block.group(1)
+        covered = [False] * len(body)
+        for span in _CITATION_RANGE_RE.finditer(body):
+            start, end = int(span.group(1)), int(span.group(2))
+            if start <= end and end - start <= _MAX_RANGE_SPAN:
+                for page in range(start, end + 1):
+                    record(page)
+            else:
+                record(start)
+                record(end)
+            for index in range(span.start(), span.end()):
+                covered[index] = True
+        for number in _CITATION_NUMBER_RE.finditer(body):
+            if not covered[number.start()]:
+                record(int(number.group(0)))
+
+    for pattern in _OTHER_CITATION_PATTERNS:
         for match in pattern.finditer(text):
-            page = int(match.group(1))
-            if page not in seen:
-                seen.append(page)
+            record(int(match.group(1)))
+
     return seen
 
 
