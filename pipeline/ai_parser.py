@@ -344,7 +344,13 @@ def _match_key(text: str) -> str:
     # 统一小写：同一段内容在「已有结果」和「补漏结果」里大小写不一致是常事
     # （实测 \text{cases} 里的 U_c 与 U_C、以及 &= 与 & 的对齐差异），
     # 逐字符比较会把它当成新内容重复加一遍。去重只看「有没有」，不看大小写。
-    return _NORMALIZE_RE.sub("", text).lower()
+    return _NORMALIZE_RE.sub("", text).translate(_VARIANT_CHARS).lower()
+
+
+#: 只覆盖实际遇到过的繁简/异体字，不追求完整转换表：
+#: 课件 PDF 的文字层偶尔是繁体字形（实测「暫态分量」「矩陣」），
+#: 而模型读图写的是简体，逐字符比对会把同一句话当成新内容重复加一遍。
+_VARIANT_CHARS = str.maketrans("暫陣與為說點電壓電號稱", "暂阵与为说点电压电号称")
 
 
 def filter_new_lines(
@@ -434,16 +440,34 @@ def recall_page(
     asset: PageAsset,
     existing_markdown: str,
     client: OpenAICompatClient,
+    hints: Sequence[str] = (),
 ) -> RecallResult:
-    """拿原图和已有结果再问一遍，专门找漏掉的文字。不写缓存（只对少数页跑）。"""
+    """拿原图和已有结果再问一遍，专门找漏掉的文字。不写缓存（只对少数页跑）。
+
+    ``hints`` 是自检程序怀疑漏掉的具体内容。带上它之后，任务从
+    「开放地找找有什么漏的」变成「逐一确认这几处是否在图上」——
+    实测开放式提问会漏（同一页两次都报「没有发现遗漏」，
+    而原文文字层里明明有 1.5A、1A 这些图内数值）。
+    """
     if asset.image_path is None:
         return RecallResult(page_no=asset.page_no, error="这一页没有图片，无法校对")
+
+    if hints:
+        listing = "\n".join(f"  - {item}" for item in hints if str(item).strip())
+        hints_block = (
+            "\n自检程序怀疑以下内容被漏掉了，请逐一确认它们是否出现在图上：\n"
+            f"{listing}\n"
+            "出现在图上的请原样抄出来；图上确实没有的不要写。\n"
+        )
+    else:
+        hints_block = ""
 
     system = settings.prompt("page_recall", "system")
     user = settings.prompt("page_recall", "user").format(
         doc_title=entry.title,
         page_no=asset.page_no,
         existing=existing_markdown.strip()[:8000],
+        hints_block=hints_block,
     )
     try:
         raw = client.chat_with_images(

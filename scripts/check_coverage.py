@@ -223,6 +223,28 @@ def source_page_text(source_path: Path, page_no: int) -> str:
     return ""
 
 
+def build_hints(doc_key: str, pages: list[int]) -> str:
+    """为 ``--fix-commands`` 生成 --hints 参数：把这页被怀疑漏掉的内容列出来。
+
+    没有它，补漏是「你找找有什么漏的」——实测会漏；有了它，补漏是
+    「请确认 1.5A、1A、5Ω 在不在图上」——定向确认，准得多。
+    """
+    global _SUSPICION_CACHE
+    parts: list[str] = []
+    for page_no in sorted(pages):
+        items = _SUSPICION_CACHE.get((doc_key, page_no), [])
+        if not items:
+            continue
+        # 用 | 分隔（--hints 的语法），去掉可能干扰 shell 的字符
+        cleaned = [item.replace("|", "/").replace(",", "，") for item in items]
+        parts.append(f"{page_no}:" + "|".join(cleaned))
+    return ",".join(parts)
+
+
+#: check 过程中记下「哪一页被怀疑漏了什么」，供 --fix-commands 生成 --hints
+_SUSPICION_CACHE: dict[tuple[str, int], list[str]] = {}
+
+
 def build_review_section(
     doc_key: str,
     page_no: int,
@@ -394,6 +416,9 @@ def main(argv: list[str] | None = None) -> int:
 
             bad_pages += 1
             flagged.setdefault(entry.doc_key, []).append(page_no)
+            _SUSPICION_CACHE[(entry.doc_key, page_no)] = [
+                str(item["run"]) for item in suspicious
+            ] + [str(value) for value in numbers_missing]
             review.append(
                 build_review_section(
                     entry.doc_key,
@@ -437,8 +462,13 @@ def main(argv: list[str] | None = None) -> int:
         if not flagged:
             print("没有需要重解析的页。")
             return 0
-        print("# 把下面几条依次执行，即可用当前提示词重解析所有有问题的页")
-        print("# （只重跑这些页，不是整份资料，花费很小）")
+        print("# 先跑补漏：把自检怀疑漏掉的内容交给模型定向确认（比开放式找漏可靠）")
+        for doc_key, pages in flagged.items():
+            spec = ",".join(str(value) for value in sorted(pages))
+            hints = build_hints(doc_key, pages)
+            hint_arg = f' --hints "{hints}"' if hints else ""
+            print(f"python -m pipeline recall --doc {doc_key} --pages {spec}{hint_arg}")
+        print("# 补漏没解决的，可以整页重解析（走缓存免费，或改提示词后重跑）")
         for doc_key, pages in flagged.items():
             spec = ",".join(str(value) for value in sorted(pages))
             print(f"python -m pipeline parse --doc {doc_key} --pages {spec}")

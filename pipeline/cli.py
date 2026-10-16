@@ -162,6 +162,34 @@ def parse_pages(spec: str | None) -> set[int] | None:
     return pages or None
 
 
+def parse_hints(spec: str | None) -> dict[int, list[str]]:
+    """解析 ``--hints``，形如 ``26:1.5A|1A|5Ω,13:独立源``。
+
+    把自检程序怀疑漏掉的具体内容告诉补漏模型，任务就从「开放地找漏」
+    变成「逐一确认这几处」——后者实测明显更可靠。
+    """
+    if not spec:
+        return {}
+    mapping: dict[int, list[str]] = {}
+    for chunk in spec.split(","):
+        chunk = chunk.strip()
+        if not chunk or ":" not in chunk:
+            continue
+        page_part, _, items_part = chunk.partition(":")
+        try:
+            page_no = int(page_part.strip())
+        except ValueError:
+            continue
+        items = [
+            item.strip()
+            for item in items_part.replace("、", "|").split("|")
+            if item.strip()
+        ]
+        if items:
+            mapping[page_no] = items
+    return mapping
+
+
 def resolve_entries(settings: Settings, args: argparse.Namespace) -> list[ManifestEntry]:
     manifest_path = settings.root / "config" / "manifest.csv"
     entries = load_manifest(manifest_path)
@@ -615,6 +643,7 @@ def cmd_recall(settings: Settings, args: argparse.Namespace) -> int:
 
         assets = {asset.page_no: asset for asset in rendered.pages}
         pages_dir = settings.paths.doc_pages(entry.doc_key)
+        hint_map = parse_hints(args.hints)
         info(f"\n=== {entry.doc_key} · {entry.title} ===")
 
         for page_no in sorted(pages):
@@ -625,7 +654,14 @@ def cmd_recall(settings: Settings, args: argparse.Namespace) -> int:
                 continue
 
             existing = page_path.read_text(encoding="utf-8")
-            result = recall_page(entry, settings, asset, existing, client)
+            result = recall_page(
+                entry,
+                settings,
+                asset,
+                existing,
+                client,
+                hints=hint_map.get(page_no, ()),
+            )
             if result.error:
                 fail(f"第 {page_no} 页校对失败：{result.error}")
                 exit_code = 1
@@ -979,6 +1015,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_doc_args(p)
     p.add_argument("--pages", required=True, help="要校对的页，如 14,26,35")
+    p.add_argument(
+        "--hints",
+        help="自检怀疑漏掉的内容，形如 26:1.5A|1A|5Ω,13:独立源。"
+        "带上它补漏会明显更准（把开放式找漏变成定向确认）",
+    )
 
     p = sub.add_parser("load", help="步骤 6：向量化并写入知识库")
     add_doc_args(p)

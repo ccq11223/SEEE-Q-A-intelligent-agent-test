@@ -240,6 +240,46 @@ class TestRecallPage(unittest.TestCase):
         )
         self.assertLess(len(client.last_user), 12000)
 
+    def test_hints_are_passed_into_the_prompt(self) -> None:
+        client = FakeVision()
+        recall_page(
+            self.entry,
+            self.settings,
+            self.asset,
+            "已有正文",
+            client,
+            hints=["1.5A", "1A"],
+        )
+        self.assertIn("1.5A", client.last_user)
+        self.assertIn("逐一确认", client.last_user)
+
+    def test_no_hints_leaves_no_hint_block(self) -> None:
+        client = FakeVision()
+        recall_page(self.entry, self.settings, self.asset, "已有正文", client)
+        self.assertNotIn("逐一确认", client.last_user)
+
+
+class TestParseHints(unittest.TestCase):
+    def test_parses_page_and_items(self) -> None:
+        from pipeline.cli import parse_hints
+
+        self.assertEqual(
+            parse_hints("26:1.5A|1A|5Ω,13:独立源"),
+            {26: ["1.5A", "1A", "5Ω"], 13: ["独立源"]},
+        )
+
+    def test_accepts_chinese_separator(self) -> None:
+        from pipeline.cli import parse_hints
+
+        self.assertEqual(parse_hints("7:甲、乙"), {7: ["甲", "乙"]})
+
+    def test_empty_returns_empty_dict(self) -> None:
+        from pipeline.cli import parse_hints
+
+        self.assertEqual(parse_hints(None), {})
+        self.assertEqual(parse_hints(""), {})
+        self.assertEqual(parse_hints("乱写的"), {})
+
 
 if __name__ == "__main__":
     unittest.main()
