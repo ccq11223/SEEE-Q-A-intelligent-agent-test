@@ -12,6 +12,7 @@ from pathlib import Path
 from .ai_parser import build_client, parse_document
 from .answer import answer_question
 from .convert import ConvertError, render_document
+from .dsn import inspect_dsn
 from .env import get_env
 from .llm import LLMError, ModelConfig, OpenAICompatClient
 from .manifest import ManifestEntry, ManifestError, load_manifest, select
@@ -214,10 +215,24 @@ def cmd_doctor(settings: Settings, args: argparse.Namespace) -> int:
     if backend == "local":
         info(f"  本地输出目录：{settings.paths.out_dir}")
     else:
-        has_dsn = bool(get_env("SUPABASE_DB_URL"))
-        info(f"  {'✓' if has_dsn else '✗'} SUPABASE_DB_URL")
-        if not has_dsn:
+        dsn = get_env("SUPABASE_DB_URL")
+        info(f"  {'✓' if dsn else '✗'} SUPABASE_DB_URL")
+        if not dsn:
             problems.append("storage.backend=postgres 但缺少 SUPABASE_DB_URL")
+        else:
+            report = inspect_dsn(dsn)
+            if report.ok:
+                info(
+                    f"      解析结果：主机 {report.host}｜库 {report.dbname}"
+                    f"｜用户 {report.user}"
+                )
+            else:
+                info("      连接串体检未通过：")
+                for problem in report.problems:
+                    info(f"        · {problem}")
+                problems.extend(report.problems)
+            for hint in report.hints:
+                info(f"      提示：{hint}")
 
     info("\n[资料台账]")
     manifest_path = settings.root / "config" / "manifest.csv"

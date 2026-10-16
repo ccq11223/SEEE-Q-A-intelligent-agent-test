@@ -60,6 +60,7 @@ agent-code/
 │   ├── chunker.py         步骤 5 清洗与切块
 │   ├── embedder.py        步骤 6 向量化
 │   ├── store.py           步骤 6 写入知识库（postgres / local 两种后端）
+│   ├── dsn.py             数据库连接串体检（口令里的特殊字符会被悄悄解析错）
 │   ├── retrieval.py       检索与「有没有依据」判定
 │   ├── answer.py          答疑决策链（阶段 2 在线服务复用同一套）
 │   └── cli.py             命令行入口
@@ -92,7 +93,7 @@ agent-code/
 python -m unittest discover -s tests -t .
 ```
 
-95 项测试，全部离线：唯一的假件是「视觉模型」和「向量模型」，
+115 项测试，全部离线：唯一的假件是「视觉模型」和「向量模型」，
 渲染、切块、存储、检索走真实代码。
 
 ## 文档

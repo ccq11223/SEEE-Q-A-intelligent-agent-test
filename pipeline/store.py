@@ -640,9 +640,18 @@ def open_store(settings: Settings) -> Store:
     if backend == "local":
         return LocalStore(settings.paths.out_dir)
     if backend == "postgres":
+        from .dsn import inspect_dsn
         from .env import require_env
 
         dsn = require_env("SUPABASE_DB_URL", purpose="写入云端知识库")
+        report = inspect_dsn(dsn)
+        if not report.ok:
+            details = "\n".join(f"  · {item}" for item in report.problems)
+            hints = "\n".join(f"  提示：{item}" for item in report.hints)
+            raise RuntimeError(
+                f"SUPABASE_DB_URL 有问题，先修好连接串再连数据库：\n{details}\n{hints}\n"
+                f"可以运行 python -m pipeline doctor 看到同样的体检结果。"
+            )
         return PostgresStore(dsn, schema=str(settings.storage.get("schema", "public")))
     raise RuntimeError(
         f"config/pipeline.yaml 里的 storage.backend={backend!r} 不认识，可选 local / postgres"
