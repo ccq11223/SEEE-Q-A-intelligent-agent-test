@@ -23,5 +23,8 @@ data/
 out/
 encoding-report.txt
 审核工作单.md
+tests/golden/report.md
+tests/golden/candidates.jsonl
+tests/golden/negative-candidates.jsonl
 .DS_Store
 Thumbs.db

@@ -611,6 +611,154 @@ def cmd_parse(settings: Settings, args: argparse.Namespace) -> int:
     return exit_code
 
 
+def cmd_golden(settings: Settings, args: argparse.Namespace) -> int:
+    """黄金测试集：跑一遍固定题集，给出命中率与编造率。"""
+    from datetime import datetime
+
+    from .golden import (
+        GoldenError,
+        load_cases,
+        render_report,
+        run_golden,
+        summarize_cases,
+    )
+
+    path = Path(args.file) if args.file else settings.root / "tests" / "golden" / "qa.jsonl"
+    if not path.is_absolute():
+        path = (settings.root / path).resolve()
+
+    try:
+        cases = load_cases(path)
+    except GoldenError as exc:
+        fail(str(exc))
+        return 2
+
+    if not cases:
+        warn(f"{path} 里还没有题目。格式说明见 tests/golden/README.md。")
+        return 2
+
+    info(f"题集：{path}")
+    info(summarize_cases(cases))
+    if args.only:
+        wanted = set(args.only)
+        known = {case.id for case in cases}
+        unknown = sorted(wanted - known)
+        if unknown:
+            fail(f"题集里没有这些 id：{', '.join(unknown)}")
+            return 2
+        cases = [case for case in cases if case.id in wanted]
+        info(f"只跑指定的 {len(cases)} 题")
+
+    if args.check:
+        for case in cases:
+            kind = "负样本" if case.negative else f"正样本（期望第 {case.expect_pages} 页）"
+            info(f"  {case.status:<5} {case.id:<16} {kind:<26} {case.question}")
+        info("")
+        info("格式校验通过。加 --only-retrieval 可以只测检索（最便宜）。")
+        return 0
+
+    store = open_store(settings)
+    try:
+        embed = embed_client(settings)
+        try:
+            generator = OpenAICompatClient(
+                ModelConfig.from_dict("generate", settings.model_config("generate"))
+            )
+        except (ConfigError, LLMError) as exc:
+            fail(str(exc))
+            embed.close()
+            store.close()
+            return 1
+    except (ConfigError, LLMError) as exc:
+        fail(str(exc))
+        store.close()
+        return 1
+
+    def show(result, index: int, total: int) -> None:
+        case = result.case
+        if case.negative:
+            if not result.mode:
+                mark = "未判定（仅检索模式）"
+            elif result.fabricated:
+                mark = "编造嫌疑"
+            elif result.handed_off:
+                mark = "转人工"
+            else:
+                mark = "已说明缺口"
+            info(
+                f"  [{index}/{total}] {case.id} 负样本 → {mark}"
+                f"（模式 {result.mode or '—'}，最高分 {result.top_score:.3f}）"
+            )
+        else:
+            mark = "命中" if result.retrieval_hit else "未命中"
+            front = "前置命中" if result.front_hit else "前置未命中"
+            shown = "、".join(
+                f"{label}({score:.3f})" for label, score in result.top_hits
+            ) or "（没召回任何内容）"
+            info(
+                f"  [{index}/{total}] {case.id} 正样本 → 检索{mark}、{front}"
+                f"（期望第 {case.expect_pages} 页）"
+            )
+            info(f"        最相关的几条：{shown}")
+        if result.error:
+            warn(f"      运行出错：{result.error.splitlines()[0]}")
+
+    try:
+        report = run_golden(
+            cases,
+            settings,
+            store,
+            embed,
+            generator,
+            retrieval_only=args.only_retrieval,
+            progress=show,
+        )
+    except LLMError as exc:
+        fail(str(exc))
+        return 1
+    finally:
+        embed.close()
+        generator.close()
+        store.close()
+
+    thresholds = {
+        "hit_rate": args.min_hit_rate,
+        "fabrication_rate": args.max_fabrication_rate,
+    }
+    report_path = (
+        Path(args.report)
+        if args.report
+        else settings.root / "tests" / "golden" / "report.md"
+    )
+    report_path.write_text(
+        render_report(
+            report,
+            thresholds=thresholds,
+            generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        ),
+        encoding="utf-8",
+    )
+
+    info("")
+    info(f"检索命中率：{report.hit_rate:.0%}（目标 ≥ {args.min_hit_rate:.0%}）")
+    if not args.only_retrieval:
+        info(f"编造率：{report.fabrication_rate:.0%}（目标 ≤ {args.max_fabrication_rate:.0%}）")
+        info(f"回答可用率：{report.answer_rate:.0%}｜负样本转人工率：{report.handoff_rate:.0%}")
+    info(f"报告：{report_path}")
+
+    fabricated = [item for item in report.results if item.fabricated]
+    if fabricated:
+        warn(f"有 {len(fabricated)} 道负样本被编造：{', '.join(item.case.id for item in fabricated)}")
+
+    ok = (
+        report.hit_rate >= args.min_hit_rate
+        and report.fabrication_rate <= args.max_fabrication_rate
+    )
+    if not ok:
+        fail("有指标不达标，详见报告。")
+    return 0 if ok else 1
+
+
 def cmd_recall(settings: Settings, args: argparse.Namespace) -> int:
     """补漏校对：对指定的页，拿原图和已有结果再问一遍，只补漏掉的文字。
 
@@ -1027,6 +1175,28 @@ def build_parser() -> argparse.ArgumentParser:
         "带上它补漏会明显更准（把开放式找漏变成定向确认）",
     )
 
+    p = sub.add_parser(
+        "golden",
+        help="黄金测试集：跑一遍固定题集，给出检索命中率与编造率",
+    )
+    p.add_argument("--file", help="题集文件，默认 tests/golden/qa.jsonl")
+    p.add_argument("--check", action="store_true", help="只校验题集格式，不联网")
+    p.add_argument(
+        "--only-retrieval",
+        action="store_true",
+        help="只测检索命中率（只调用向量模型，最便宜）",
+    )
+    p.add_argument("--only", action="append", help="只跑指定 id，可重复")
+    p.add_argument("--limit", type=int, help="只跑前 N 题")
+    p.add_argument("--report", help="报告输出路径，默认 tests/golden/report.md")
+    p.add_argument("--min-hit-rate", type=float, default=0.8, help="检索命中率下限，默认 0.8")
+    p.add_argument(
+        "--max-fabrication-rate",
+        type=float,
+        default=0.05,
+        help="编造率上限，默认 0.05",
+    )
+
     p = sub.add_parser("load", help="步骤 6：向量化并写入知识库")
     add_doc_args(p)
 
@@ -1076,6 +1246,7 @@ def main(argv: list[str] | None = None) -> int:
         "render": cmd_render,
         "parse": cmd_parse,
         "recall": cmd_recall,
+        "golden": cmd_golden,
         "chunk": cmd_chunk,
         "load": cmd_load,
         "run": cmd_run,

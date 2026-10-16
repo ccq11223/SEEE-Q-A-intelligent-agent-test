@@ -22,6 +22,15 @@ class LLMError(RuntimeError):
     """模型调用失败。消息里必须带上服务商返回的原文，方便对症下药。"""
 
 
+class OutputTruncated(LLMError):
+    """推理模型的思考过程把 max_tokens 用光了，答案一个字都没写出来。
+
+    单独定义成一个异常，是为了能被自动重试捕获——换更大的额度再试一次，
+    而不是直接把失败抛给使用者。实测推理模型的思考长度不可预测：
+    同一个提示词，大部分页够用，个别页 4096 都不够。
+    """
+
+
 @dataclass
 class ModelConfig:
     role: str
@@ -169,17 +178,63 @@ class OpenAICompatClient:
         )
 
     # ---------- 高层能力 ----------
-    def chat(self, *, system: str, user: str, max_tokens: int | None = None) -> str:
-        payload = {
+    def _chat_payload(
+        self,
+        system: str,
+        user: str,
+        *,
+        images: Sequence[Path] = (),
+        max_tokens: int,
+    ) -> dict[str, Any]:
+        if images:
+            content: list[dict[str, Any]] = [{"type": "text", "text": user}]
+            for path in images:
+                content.append(
+                    {"type": "image_url", "image_url": {"url": image_to_data_url(path)}}
+                )
+            user_content: Any = content
+        else:
+            user_content = user
+        return {
             "model": self.config.name,
             "messages": [
                 {"role": "system", "content": system},
-                {"role": "user", "content": user},
+                {"role": "user", "content": user_content},
             ],
-            "max_tokens": max_tokens or self.config.max_tokens,
+            "max_tokens": max_tokens,
             "temperature": self.config.temperature,
         }
-        return self._extract_text(self._post("/chat/completions", payload))
+
+    def _chat_with_escalation(
+        self,
+        system: str,
+        user: str,
+        *,
+        images: Sequence[Path] = (),
+        max_tokens: int | None = None,
+    ) -> str:
+        """输出被推理过程挤空时，自动加大额度重试。
+
+        实测推理模型的思考长度不可预测：同一批页面里大部分额度够用，
+        个别页照样被吃光。自动翻倍重试比让人盯着报错去改配置靠谱。
+        """
+        cap = max_tokens or self.config.max_tokens
+        last_error: Exception | None = None
+        for _ in range(3):
+            payload = self._chat_payload(system, user, images=images, max_tokens=cap)
+            try:
+                return self._extract_text(self._post("/chat/completions", payload))
+            except OutputTruncated as exc:
+                last_error = exc
+                cap = min(cap * 2, 32768)
+        raise LLMError(
+            f"连续 3 次都因为思考过程占满额度而没写出答案，最后试到 {cap}。\n"
+            f"可以把 config/models.yaml 里该模型的 max_tokens 调得更大，"
+            f"或换一个非推理模型。\n{last_error}"
+        )
+
+    def chat(self, *, system: str, user: str, max_tokens: int | None = None) -> str:
+        return self._chat_with_escalation(system, user, max_tokens=max_tokens)
 
     def chat_with_images(
         self,
@@ -191,23 +246,9 @@ class OpenAICompatClient:
     ) -> str:
         if not image_paths:
             return self.chat(system=system, user=user, max_tokens=max_tokens)
-
-        content: list[dict[str, Any]] = [{"type": "text", "text": user}]
-        for path in image_paths:
-            content.append(
-                {"type": "image_url", "image_url": {"url": image_to_data_url(path)}}
-            )
-
-        payload = {
-            "model": self.config.name,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": content},
-            ],
-            "max_tokens": max_tokens or self.config.max_tokens,
-            "temperature": self.config.temperature,
-        }
-        return self._extract_text(self._post("/chat/completions", payload))
+        return self._chat_with_escalation(
+            system, user, images=image_paths, max_tokens=max_tokens
+        )
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
         if not texts:
@@ -244,12 +285,9 @@ class OpenAICompatClient:
             reasoning = message.get("reasoning_content")
             finish = choice.get("finish_reason")
             if reasoning:
-                raise LLMError(
-                    f"模型只输出了思考过程、没有输出答案（finish_reason={finish}）。\n"
-                    f"这是推理模型的典型表现：max_tokens 被思考过程用光了。\n"
-                    f"解决办法：把 config/models.yaml 里该模型的 max_tokens 调大"
-                    f"（推理模型建议 4096 以上），或换一个非推理模型。\n"
-                    f"思考过程开头：{str(reasoning)[:120]}"
+                raise OutputTruncated(
+                    f"模型只输出了思考过程、没有输出答案（finish_reason={finish}）："
+                    f"max_tokens 被思考过程用光了。思考过程开头：{str(reasoning)[:120]}"
                 )
         if not text:
             raise LLMError(f"模型返回内容为空：{str(data)[:400]}")
