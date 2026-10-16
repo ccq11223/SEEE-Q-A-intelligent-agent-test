@@ -43,41 +43,31 @@ def info(message: str) -> None:
 
 
 def configure_stdio() -> None:
-    """让输出编码与终端实际期望的编码一致，避免中文变乱码。
+    """统一按 UTF-8 输出，并把装不下的字符替换掉，绝不让打印本身把程序搞崩。
 
-    这里踩过两次坑，都是「只在一半场景下对」：
+    这里前后踩了三次坑，记录一下，免得再改回去：
 
-    * 不做任何处理：中文 Windows 控制台是 GBK，`✓` 这种字符会直接抛
-      UnicodeEncodeError，程序崩在打印上；
-    * 一律强制 UTF-8：直接运行时正常，但一旦 `python -m pipeline ... | Select-String`
-      这种管道，PowerShell 会按控制台代码页（GBK）去解码，中文全变乱码。
+    1. 不做任何处理：中文 Windows 上 Python 默认用 GBK 输出 `✓`，直接抛
+       UnicodeEncodeError，程序崩在打印上。
+    2. 一律强制 UTF-8：终端（Windows Terminal、VS Code、Codex 的终端）本来就按
+       UTF-8 解码，所以显示正常；但 `python -m pipeline ... | Select-String`
+       这种管道是 PowerShell 5.1 用控制台代码页（GBK）解码的，会乱码。
+    3. 改为跟随控制台代码页：管道正常了，终端反而全乱——因为终端要的是 UTF-8。
 
-    正确做法是**跟随控制台自己的输出代码页**（GetConsoleOutputCP），
-    只把无法编码的字符替换掉、绝不崩。想强制指定的话，设置 PYTHONIOENCODING 即可。
+    结论：**终端是主要的消费方，按 UTF-8 输出**；
+    管道那个问题用两条办法解决——PowerShell 侧把 [Console]::OutputEncoding 也设成
+    UTF-8（见 scripts/setup-console.ps1），或者干脆用命令自带的 --grep 不走管道。
+    想强制指定编码就设 PYTHONIOENCODING 环境变量，这里不覆盖。
     """
     if os.environ.get("PYTHONIOENCODING"):
         return
-
-    encoding: str | None = None
-    if os.name == "nt":
-        try:
-            import ctypes
-
-            codepage = ctypes.windll.kernel32.GetConsoleOutputCP()
-            if codepage:
-                encoding = "utf-8" if codepage == 65001 else f"cp{codepage}"
-        except Exception:  # pragma: no cover - 取不到就用默认
-            encoding = None
 
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is None:
             continue
         try:
-            if encoding:
-                reconfigure(encoding=encoding, errors="replace")
-            else:
-                reconfigure(errors="replace")
+            reconfigure(encoding="utf-8", errors="replace")
         except (ValueError, OSError):  # pragma: no cover - 环境不支持时忽略
             pass
 
