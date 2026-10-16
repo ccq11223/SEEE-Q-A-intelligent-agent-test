@@ -22,5 +22,6 @@ data/
 *.log
 out/
 encoding-report.txt
+审核工作单.md
 .DS_Store
 Thumbs.db
