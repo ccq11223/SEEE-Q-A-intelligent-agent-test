@@ -583,6 +583,84 @@ def cmd_parse(settings: Settings, args: argparse.Namespace) -> int:
     return exit_code
 
 
+def cmd_recall(settings: Settings, args: argparse.Namespace) -> int:
+    """补漏校对：对指定的页，拿原图和已有结果再问一遍，只补漏掉的文字。
+
+    为什么需要它：第一遍转写会稳定地漏掉「图上的短标签、口诀、例题答案」
+    这类孤立文字。全量重跑代价高、而且 temperature=0 时结果不会变；
+    只对自检挑出来的页做一次「找漏」既便宜又有效。
+    """
+    from .ai_parser import merge_recall, recall_page
+    from .runner import load_render, write_combined_markdown
+
+    entries = resolve_entries(settings, args)
+    pages = parse_pages(args.pages)
+    if not pages:
+        fail("请用 --pages 指定要校对的页，例如 --pages 14,26,35")
+        return 2
+
+    try:
+        client = build_client(settings)
+    except (ConfigError, LLMError) as exc:
+        fail(str(exc))
+        return 1
+
+    exit_code = 0
+    for entry in entries:
+        rendered = load_render(settings, entry.doc_key)
+        if rendered is None:
+            fail(f"{entry.doc_key}：还没有渲染结果，请先执行 render。")
+            exit_code = 1
+            continue
+
+        assets = {asset.page_no: asset for asset in rendered.pages}
+        pages_dir = settings.paths.doc_pages(entry.doc_key)
+        info(f"\n=== {entry.doc_key} · {entry.title} ===")
+
+        for page_no in sorted(pages):
+            asset = assets.get(page_no)
+            page_path = pages_dir / f"{entry.doc_key}_page_{page_no:04d}.md"
+            if asset is None or not page_path.is_file():
+                warn(f"第 {page_no} 页：找不到页面或解析结果，跳过")
+                continue
+
+            existing = page_path.read_text(encoding="utf-8")
+            result = recall_page(entry, settings, asset, existing, client)
+            if result.error:
+                fail(f"第 {page_no} 页校对失败：{result.error}")
+                exit_code = 1
+                continue
+            if not result.added:
+                info(f"  第 {page_no} 页：没有发现遗漏")
+                continue
+
+            if result.suspicious:
+                warn(
+                    f"第 {page_no} 页：补漏结果异常（{result.reason}），"
+                    f"**没有写入**。多半是模型跑偏了，请打开原图和"
+                    f"`{page_path}` 人工确认。"
+                )
+                for line in result.added.splitlines()[:5]:
+                    info(f"      {line.strip()}")
+                exit_code = 1
+                continue
+
+            page_path.write_text(
+                merge_recall(existing, result.added), encoding="utf-8"
+            )
+            info(f"  第 {page_no} 页：补上 {len(result.added.splitlines())} 行")
+            for line in result.added.splitlines()[:6]:
+                info(f"      {line.strip()}")
+
+        _, missing = write_combined_markdown(settings, entry, rendered.page_count)
+        if missing:
+            warn(f"{entry.doc_key}：仍有 {len(missing)} 页没有解析结果")
+        info(f"{entry.doc_key}：已更新页面文件，接着执行 chunk 重新切块")
+
+    client.close()
+    return exit_code
+
+
 def cmd_chunk(settings: Settings, args: argparse.Namespace) -> int:
     entries = resolve_entries(settings, args)
     exit_code = 0
@@ -895,6 +973,13 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("chunk", help="步骤 5：清洗与切块")
     add_doc_args(p)
 
+    p = sub.add_parser(
+        "recall",
+        help="补漏校对：对指定的页，拿原图和已有结果再问一遍，只补漏掉的文字",
+    )
+    add_doc_args(p)
+    p.add_argument("--pages", required=True, help="要校对的页，如 14,26,35")
+
     p = sub.add_parser("load", help="步骤 6：向量化并写入知识库")
     add_doc_args(p)
 
@@ -943,6 +1028,7 @@ def main(argv: list[str] | None = None) -> int:
         "register": cmd_register,
         "render": cmd_render,
         "parse": cmd_parse,
+        "recall": cmd_recall,
         "chunk": cmd_chunk,
         "load": cmd_load,
         "run": cmd_run,

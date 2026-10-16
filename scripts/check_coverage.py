@@ -146,7 +146,7 @@ def compare_page(source: str, parsed: str, *, page_no: int | None = None) -> dic
                 "run": run,
                 "coverage": coverage,
                 "hint": best_snippet(run, parsed_cjk),
-                "level": "疑似缺失" if coverage < 0.3 else "待抽查",
+                    "level": "很可能缺失" if coverage < 0.55 else "有差异",
             }
         )
 
@@ -158,9 +158,9 @@ def compare_page(source: str, parsed: str, *, page_no: int | None = None) -> dic
         "runs_total": len(source_runs),
         "suspicious": triaged,
         "number_coverage": 1 - len(missing_numbers) / number_total,
-        # 只把「疑似缺失」计入覆盖率，「待抽查」不算扣分
+        # 只把「很可能缺失」计入覆盖率，「有差异」不算扣分
         "run_coverage": 1 - sum(
-            1 for item in triaged if item["level"] == "疑似缺失"
+            1 for item in triaged if item["level"] == "很可能缺失"
         )
         / run_total,
     }
@@ -260,12 +260,12 @@ def build_review_section(
         lines.append("**有差异的片段**：")
         lines.append("")
         for item in suspicious:
-            if item["level"] == "疑似缺失":
-                lines.append(f"- 【疑似缺失】{item['run']}")
+            if item["level"] == "很可能缺失":
+                lines.append(f"- 【很可能缺失】{item['run']}")
             else:
                 lines.append(
-                    f"- 【待抽查】{item['run']}"
-                    f" → 解析里像的是「{item['hint']}」"
+                    f"- 【有差异】{item['run']}"
+                    f"  解析里最像的是「{item['hint']}」"
                     f"（重合 {float(item['coverage']):.0%}）"
                 )
         lines.append("")
@@ -414,7 +414,7 @@ def main(argv: list[str] | None = None) -> int:
             for value in numbers_missing[: args.show]:
                 rows.append(f"      数字缺失  {value}")
             for item in suspicious[: args.show]:
-                if item["level"] == "疑似缺失":
+                if item["level"] == "很可能缺失":
                     rows.append(f"      [{item['level']}] {item['run']}")
                 else:
                     shown = item["hint"] or "（找不到相似内容）"
@@ -456,11 +456,14 @@ def main(argv: list[str] | None = None) -> int:
             "## 怎么用这份清单",
             "",
             "1. 每页先读「机器判读」，再打开那一页的原图对照。",
-            "2. 【待抽查】通常不用管：括号里已经给出解析里长得像的内容，",
-            "   多数是模型把原文笔误改顺了、或繁体字形写成简体。",
-            "3. 【疑似缺失】要重点确认：那段原文在解析结果里基本找不到。",
-            "4. 确认真的漏了，就把这一页记进 `parse_errors` 表，",
-            "   或者把整页重新解析一遍（`python -m pipeline parse --doc <编号> --pages <页>`）。",
+            "2. **两类都要回原图确认，不要凭「有差异」就放过。**",
+            "   实测教训：某页原文同时有「加强型耦合」和「削弱型耦合」，解析只留了前者。",
+            "   因为「型耦合」三字重合，工具判成轻微差异，但两个词的含义正好相反。",
+            "   相似度高不等于没错。",
+            "3. 【很可能缺失】：那段原文在解析结果里基本找不到，优先处理。",
+            "4. 【有差异】：给出解析里最像的内容，但你必须回原图确认是不是同一个意思。",
+            "   模型改顺原文笔误是常事，把语义改反也发生过。",
+            "5. 确有遗漏就用补漏命令整页重跑（见 docs/人工审核指南.md）。",
             "",
             "---",
             "",
@@ -475,9 +478,9 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"\n共核对 {checked_pages} 页，其中 {bad_pages} 页有缺失需要人工确认。")
     print(
-        "判读方式：「疑似缺失」= 这段原文在新结果里基本找不到，要重点看；"
-        "「待抽查」= 有差异但重合度高（可能是模型改顺了笔误或繁简字形），"
-        "对照括号里的提示一眼即可判断。"
+        "判读方式：【很可能缺失】= 这段原文在新结果里基本找不到；"
+        "【有差异】= 解析里有相似内容，但必须回原图确认是不是同一个意思——"
+        "相似度高不等于没错，实测出现过「削弱型」被写成「加强型」这种语义反转。"
     )
     return 1 if bad_pages else 0
 

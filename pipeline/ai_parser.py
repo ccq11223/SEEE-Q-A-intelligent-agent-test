@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -304,3 +305,179 @@ def build_client(settings: Settings) -> OpenAICompatClient:
     return OpenAICompatClient(
         cfg, retry=max(1, int(settings.parsing.get("retry", 3)))
     )
+
+
+# ---------------------------------------------------------------------------
+# 补漏校对
+# ---------------------------------------------------------------------------
+
+RECALL_EMPTY = "[无遗漏]"
+RECALL_MARKER = "<!-- 以下内容由补漏校对补上 -->"
+
+#: 做「这行是不是已经有了」比较时，先抹掉这些不承载语义的符号：
+#: 空白、LaTeX 标记、Markdown 标记、全角半角标点、等号加号。
+#: 抹掉它们的原因：同一段内容在已有结果和补漏结果里写法可能不同——
+#: 逐字符比较会把它当成新内容重复加一遍（实测发生过）。
+_NORMALIZE_RE = re.compile(r"[\s\$\{\}\\_\^~\*#`，,：:；;。.、()（）\[\]【】=\-—+&|]+")
+
+#: 太短的片段不参与去重判断，否则「电压」这种两字词会把新内容误判成重复
+_MIN_DEDUP_LENGTH = 2
+
+#: 补漏模型偶尔会「跑偏」，把思考过程当成结果写出来
+#: （实测出现过「等等，以上其实已在已有结果中。重新严格比对图片与已有转写：……」）。
+#: 这些短语只可能出现在它的自我分析里，不可能出现在课件正文中，直接丢掉。
+RECALL_META_PHRASES = (
+    "已在已有结果",
+    "已有结果中",
+    "已有转写",
+    "重新比对",
+    "重新严格比对",
+    "可视为已覆盖",
+    "等等，",
+)
+
+#: 单独成行的这些符号没有信息量，是模型输出的空占位
+_EMPTY_LINE_TOKENS = {"$$", "$", "---", "***", "```", "|"}
+
+
+def _match_key(text: str) -> str:
+    # 统一小写：同一段内容在「已有结果」和「补漏结果」里大小写不一致是常事
+    # （实测 \text{cases} 里的 U_c 与 U_C、以及 &= 与 & 的对齐差异），
+    # 逐字符比较会把它当成新内容重复加一遍。去重只看「有没有」，不看大小写。
+    return _NORMALIZE_RE.sub("", text).lower()
+
+
+def filter_new_lines(
+    existing: str, added: str, *, page_no: int | None = None
+) -> str:
+    """丢掉「其实已经有了」的行，避免补漏把同一段内容写成两份。
+
+    宁可漏掉少数真重复，也不要把新内容误删：所以只在整行归一化后
+    **长度足够、且在已有结果里能整段找到** 时才判定为重复。
+    """
+    existing_key = _match_key(existing)
+    kept: list[str] = []
+    for raw in added.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line in _EMPTY_LINE_TOKENS:
+            continue
+        key = _match_key(line)
+        if len(key) < _MIN_DEDUP_LENGTH:
+            continue
+        # 孤立的纯数字：要么是页码，要么是编号，单独一行没有意义
+        if key.isdigit() and (len(key) <= 2 or key == str(page_no)):
+            continue
+        if len(key) >= _MIN_DEDUP_LENGTH and key in existing_key:
+            continue
+        kept.append(line)
+    return "\n".join(kept)
+
+
+@dataclass
+class RecallResult:
+    page_no: int
+    added: str = ""
+    error: str | None = None
+    #: 补漏结果异常膨胀时置位：这时**不要自动写入**，交给人看
+    suspicious: bool = False
+    reason: str = ""
+
+
+#: 补漏结果超过「已有内容的这个比例」就认为跑偏了。
+#: 实测教训：某页已有 1500 字，补漏返回 3000 字，里面大半是模型的自言自语
+#: 和空占位；这种结果一旦自动追加进页文件，人工审核反而更费劲。
+RECALL_MAX_RATIO = 0.6
+RECALL_MAX_LINES = 40
+
+
+def judge_recall(existing: str, added: str) -> tuple[bool, str]:
+    """判断补漏结果是否异常膨胀。返回（是否可疑, 原因）。"""
+    if not added.strip():
+        return False, ""
+    lines = [line for line in added.splitlines() if line.strip()]
+    if len(lines) > RECALL_MAX_LINES:
+        return True, f"补漏返回了 {len(lines)} 行，超过 {RECALL_MAX_LINES} 行的上限"
+    existing_len = len(existing.strip())
+    if existing_len and len(added) > existing_len * RECALL_MAX_RATIO:
+        return (
+            True,
+            f"补漏内容 {len(added)} 字，已超过已有内容 {existing_len} 字的 "
+            f"{RECALL_MAX_RATIO:.0%}",
+        )
+    return False, ""
+
+
+def _clean_recall(text: str) -> str:
+    """把「无遗漏」这类空回复识别出来，返回真正需要补充的内容。"""
+    cleaned = text.strip()
+    if not cleaned:
+        return ""
+    # 模型有时会在前后加一句「没有遗漏」再给结果，去掉纯声明行
+    lines = [
+        line
+        for line in cleaned.splitlines()
+        if line.strip()
+        and "无遗漏" not in line
+        and "没有遗漏" not in line
+        and not any(phrase in line for phrase in RECALL_META_PHRASES)
+    ]
+    if not lines:
+        return ""
+    return "\n".join(lines).strip()
+
+
+def recall_page(
+    entry: ManifestEntry,
+    settings: Settings,
+    asset: PageAsset,
+    existing_markdown: str,
+    client: OpenAICompatClient,
+) -> RecallResult:
+    """拿原图和已有结果再问一遍，专门找漏掉的文字。不写缓存（只对少数页跑）。"""
+    if asset.image_path is None:
+        return RecallResult(page_no=asset.page_no, error="这一页没有图片，无法校对")
+
+    system = settings.prompt("page_recall", "system")
+    user = settings.prompt("page_recall", "user").format(
+        doc_title=entry.title,
+        page_no=asset.page_no,
+        existing=existing_markdown.strip()[:8000],
+    )
+    try:
+        raw = client.chat_with_images(
+            system=system, user=user, image_paths=[asset.image_path]
+        )
+    except LLMError as exc:
+        return RecallResult(page_no=asset.page_no, error=str(exc))
+
+    cleaned = _clean_recall(normalize_markdown(raw))
+    filtered = filter_new_lines(
+        existing_markdown, cleaned, page_no=asset.page_no
+    )
+    suspicious, reason = judge_recall(existing_markdown, filtered)
+    return RecallResult(
+        page_no=asset.page_no,
+        added=filtered,
+        suspicious=suspicious,
+        reason=reason,
+    )
+
+
+def merge_recall(existing: str, added: str) -> str:
+    """把补漏内容追加到页文件末尾。
+
+    刻意**不**试图插回原来的位置：定位插回需要判断语义位置，容易插错；
+    追加在末尾并加一行标记，既不会破坏已有内容，人工核对时也一眼能看到补了什么。
+
+    重复校对同一页时复用已有标记，不叠加第二个——否则页文件里会出现
+    好几个「以下内容由补漏校对补上」，人工看的时候容易混淆哪段是补的。
+    """
+    addition = added.strip()
+    if not addition:
+        return existing
+    body = existing.rstrip()
+    if RECALL_MARKER in body:
+        return f"{body}\n{addition}\n"
+    return f"{body}\n\n{RECALL_MARKER}\n\n{addition}\n"
