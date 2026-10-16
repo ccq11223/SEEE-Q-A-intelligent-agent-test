@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 密钥与本地环境（绝不入库）
+.env
+.env.*
+!.env.example
+
+# 原始资料、解析中间产物、缓存、本地库产物（方案 §2.2：data/ 不入 git）
+data/
+
+# Office / 编辑器临时文件
+~$*
+*.tmp
+*.lock
+
+# 日志与临时输出
+*.log
+out/
+.DS_Store
+Thumbs.db

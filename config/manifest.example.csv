@@ -1,0 +1,6 @@
+doc_key,course_id,doc_type,trust_level,filename,title,term,priority,notes
+slide-ch01,circuit-theory-1,slide,1,电路理论_第01章_电路模型与电路定律.pptx,第01章 电路模型与电路定律,2026秋,1,中心往届串讲 PPT
+textbook-ch01,circuit-theory-1,textbook,1,教材重点_第01章.pdf,教材重点 第01章,2026秋,2,老师划定的重点页
+exam-scope-2026,circuit-theory-1,exam_scope,1,2026秋考点范围.docx,2026秋考点范围,2026秋,0,期末考点界定
+past-2023,circuit-theory-1,past_exam,2,2023年期末试题.pdf,2023 年期末考试题,2023,5,仅有题干与答案，解析待生成
+net-ideal-source,circuit-theory-1,web,3,https://example.com/ideal-source.html,网络资料：理想电流源,2026秋,9,三级资料，审核通过后才可升级为二级

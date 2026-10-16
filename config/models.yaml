@@ -1,0 +1,25 @@
+# 所有模型一律走「OpenAI 兼容」HTTP 接口。
+# 换服务商只需改 base_url / name / api_key_env 三处，代码不用动。
+
+vision:
+  name: qwen-vl-max-latest
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  api_key_env: DASHSCOPE_API_KEY
+  max_tokens: 4096
+  temperature: 0.0
+  timeout_s: 180
+
+embedding:
+  name: BAAI/bge-m3
+  base_url: https://api.siliconflow.cn/v1
+  api_key_env: SILICONFLOW_API_KEY
+  dim: 1024
+  timeout_s: 120
+
+generate:
+  name: deepseek-chat
+  base_url: https://api.deepseek.com/v1
+  api_key_env: DEEPSEEK_API_KEY
+  max_tokens: 1500
+  temperature: 0.2
+  timeout_s: 120

@@ -1,0 +1,42 @@
+# 建库流水线总配置（纳入 git，改动即调教历史）
+
+courses:
+  - id: circuit-theory-1
+    name: 电路理论（上）
+    term: 2026秋
+
+default_course_id: circuit-theory-1
+
+paths:
+  data_dir: data
+  raw_dir: data/raw
+  work_dir: data/work
+  cache_dir: data/cache
+  out_dir: data/out
+
+storage:
+  # postgres = 写入云端 Supabase/PostgreSQL；local = 只写 JSONL（无需数据库，用来先跑通流程）
+  backend: local
+  schema: public
+
+parsing:
+  # 逐页解析策略：
+  #   vision : 每页都交给视觉模型（公式/图表还原最好，成本最高）
+  #   hybrid : 原生文本够干净且页面无嵌入图片时走纯文本，否则走视觉（省钱）
+  mode: vision
+  render_max_pixels: 2000     # 页面图片长边最大像素，控制 token 与成本
+  render_dpi: 150             # PDF 渲染 DPI
+  jpeg_quality: 88
+  concurrency: 3              # 并发页数，注意各家 API 的 QPS 限制
+  retry: 3
+  hybrid_min_native_chars: 80 # hybrid 模式下判定「原生文本够用」的字数下限
+
+chunking:
+  target_chars: 550
+  max_chars: 800
+  min_chars: 200
+  overlap_chars: 80
+  flush_on_section_change: true
+
+embedding:
+  batch_size: 32
