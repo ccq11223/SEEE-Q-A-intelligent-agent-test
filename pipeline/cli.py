@@ -706,7 +706,7 @@ def cmd_chunk(settings: Settings, args: argparse.Namespace) -> int:
             fail(f"{entry.doc_key}：找不到 {markdown_path}，请先执行 parse。")
             exit_code = 1
             continue
-        chunks = run_chunking(settings, entry)
+        chunks = run_chunking(settings, entry, allow_missing=True)
         sizes = [chunk.char_count for chunk in chunks] or [0]
         info(
             f"{entry.doc_key}：{len(chunks)} 块｜字数 {min(sizes)}-{max(sizes)}｜"

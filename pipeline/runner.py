@@ -125,13 +125,29 @@ def write_combined_markdown(settings: Settings, entry: ManifestEntry, page_count
 # 步骤 5：切块
 # ---------------------------------------------------------------------------
 
-def run_chunking(settings: Settings, entry: ManifestEntry) -> list[Chunk]:
-    markdown_path = settings.paths.doc_markdown(entry.doc_key)
-    if not markdown_path.is_file():
+def run_chunking(
+    settings: Settings, entry: ManifestEntry, *, allow_missing: bool = False
+) -> list[Chunk]:
+    """切块。
+
+    **每次都从页文件重建整篇 Markdown**，而不是直接读 doc.md。
+    原因：页文件 `pages/<编号>_page_XXXX.md` 才是权威来源——补漏校对和人工
+    修补改的都是它，`doc.md` 只是派生产物。曾经踩过：手工改了页文件后跑
+    `chunk`，它读的还是旧的 doc.md，于是切出来的是过时内容（表现为云端
+    知识库里还留着早已删掉的段落）。
+    """
+    rendered = load_render(settings, entry.doc_key)
+    if rendered is None:
         raise FileNotFoundError(
-            f"找不到 {markdown_path}，请先执行 parse（AI 逐页解析）。"
+            f"找不到 {entry.doc_key} 的渲染结果，请先执行 render 与 parse。"
         )
-    markdown = markdown_path.read_text(encoding="utf-8")
+    markdown, missing = write_combined_markdown(settings, entry, rendered.page_count)
+    if missing and not allow_missing:
+        raise FileNotFoundError(
+            f"{entry.doc_key} 还有 {len(missing)} 页没有解析结果"
+            f"（前几页：{missing[:5]}），请先补齐再切块。"
+        )
+    markdown = markdown.read_text(encoding="utf-8")
     chunks = chunk_document(
         markdown,
         doc_key=entry.doc_key,
@@ -258,7 +274,9 @@ def run_document(
             return summary
 
     # ---- 步骤 5：切块 ----
-    chunks = run_chunking(settings, entry)
+    chunks = run_chunking(
+        settings, entry, allow_missing=options.allow_partial
+    )
     summary.chunk_count = len(chunks)
     log(f"  [5/6] 切块完成：{len(chunks)} 块")
     if not options.dry_run:

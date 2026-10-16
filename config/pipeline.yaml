@@ -16,7 +16,7 @@ paths:
 
 storage:
   # postgres = 写入云端 Supabase/PostgreSQL；local = 只写 JSONL（无需数据库，用来先跑通流程）
-  backend: local
+  backend: postgres
   schema: public
 
 parsing:
