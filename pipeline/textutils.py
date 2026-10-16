@@ -177,3 +177,29 @@ def validate_citations(answer: str, allowed_pages: set[int]) -> tuple[bool, list
 
 def has_any_citation(answer: str) -> bool:
     return bool(extract_citation_pages(answer))
+
+
+#: 模型自己声明「资料没覆盖」时的说法。命中它意味着这确实是个知识缺口，
+#: 即使回答里给了相关的其他内容、走了 kb 分支，也必须记进缺口清单。
+_NO_COVERAGE_PATTERNS = (
+    "没有覆盖",
+    "未覆盖",
+    "没有出现",
+    "没有讲到",
+    "没有提及",
+    "资料里没有",
+    "资料中没有",
+    "现有资料不包含",
+    "没有相关",
+)
+
+
+def mentions_missing_coverage(answer: str) -> bool:
+    """回答里是否出现了「这件事资料里没有」的声明。
+
+    为什么需要它：实测有过这种情况——学生问「回转器怎么用在有源滤波器设计里」，
+    模型老实回答「现有资料没有覆盖回转器」，然后列出资料里确实有的滤波器内容
+    并逐条标了页码。这个回答是诚实且有用的，但它走的是「有依据」分支，
+    于是这个真实的缺口**没被记进知识缺口清单**，后续就没人去补资料。
+    """
+    return any(pattern in answer for pattern in _NO_COVERAGE_PATTERNS)

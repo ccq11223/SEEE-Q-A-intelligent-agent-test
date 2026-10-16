@@ -229,12 +229,28 @@ class OpenAICompatClient:
         choices = data.get("choices") or []
         if not choices:
             raise LLMError(f"模型返回里没有 choices：{str(data)[:400]}")
-        message = choices[0].get("message") or {}
+        choice = choices[0]
+        message = choice.get("message") or {}
         text = message.get("content")
         if isinstance(text, list):  # 部分服务商返回分段结构
             text = "".join(
                 part.get("text", "") for part in text if isinstance(part, dict)
             )
+        if not text:
+            # 推理模型（实测 deepseek-flash、deepseek-v4-pro）会把思考过程放在
+            # reasoning_content 里。如果 content 为空而 finish_reason 是 length，
+            # 说明输出额度被思考过程吃光了——答案一个字都还没写就被截断。
+            # 这时必须把话说清楚，否则使用者只看到「模型返回内容为空」，无从下手。
+            reasoning = message.get("reasoning_content")
+            finish = choice.get("finish_reason")
+            if reasoning:
+                raise LLMError(
+                    f"模型只输出了思考过程、没有输出答案（finish_reason={finish}）。\n"
+                    f"这是推理模型的典型表现：max_tokens 被思考过程用光了。\n"
+                    f"解决办法：把 config/models.yaml 里该模型的 max_tokens 调大"
+                    f"（推理模型建议 4096 以上），或换一个非推理模型。\n"
+                    f"思考过程开头：{str(reasoning)[:120]}"
+                )
         if not text:
             raise LLMError(f"模型返回内容为空：{str(data)[:400]}")
         return str(text)

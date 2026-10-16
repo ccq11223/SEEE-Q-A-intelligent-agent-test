@@ -13,7 +13,12 @@ from .llm import LLMError, OpenAICompatClient
 from .retrieval import RetrievalResult, build_context, looks_like_complex_question, retrieve
 from .settings import Settings
 from .store import Hit, Store
-from .textutils import extract_citation_pages, has_any_citation, validate_citations
+from .textutils import (
+    extract_citation_pages,
+    has_any_citation,
+    mentions_missing_coverage,
+    validate_citations,
+)
 from .websearch import WebSearchUnavailable, search as web_search
 
 MODE_KB = "kb"
@@ -160,12 +165,22 @@ def answer_question(
     for attempt in range(2):
         prompt_user = user
         if attempt == 1:
-            bad = "、".join(f"第 {page} 页" for page in invalid)
-            good = "、".join(f"第 {page} 页" for page in sorted(allowed))
-            prompt_user += (
-                f"\n\n注意：上一次回答里引用了参考资料中不存在的页码（{bad}）。"
-                f"参考资料里真实存在的页码只有（{good}），请只用这些页码重新作答。"
-            )
+            if invalid:
+                bad = "、".join(f"第 {page} 页" for page in invalid)
+                good = "、".join(f"第 {page} 页" for page in sorted(allowed))
+                prompt_user += (
+                    f"\n\n注意：上一次回答里引用了参考资料中不存在的页码（{bad}）。"
+                    f"参考资料里真实存在的页码只有（{good}），请只用这些页码重新作答。"
+                )
+            else:
+                # 完全没有页码引用是另一种情况：不能拼出「不存在的页码（）」那种空话，
+                # 要直接说清要求。实测模型会写出一段很好的回答却漏掉页码。
+                good = "、".join(f"第 {page} 页" for page in sorted(allowed))
+                prompt_user += (
+                    f"\n\n注意：上一次回答里一个页码都没有标注。"
+                    f"参考资料里的页码有（{good}）。"
+                    f"请重新作答，并在每个关键结论后面用（第 X 页）标出它出自哪一页。"
+                )
         try:
             text = generate_client.chat(system=system, user=prompt_user)
         except LLMError as exc:
@@ -202,6 +217,13 @@ def answer_question(
         )
 
     ok, invalid = validate_citations(text, allowed)
+    # 回答了、也带了页码，但明确说了「资料没有覆盖」——这仍然是知识缺口，
+    # 必须记下来，否则这个缺口永远进不了待补资料清单。
+    gap_note = ""
+    if mentions_missing_coverage(text):
+        store.record_gap(course, question)
+        gap_note = "回答里明确说了资料未覆盖，已记入知识缺口清单"
+
     return finish(
         Answer(
             question=question,
@@ -212,5 +234,6 @@ def answer_question(
             hits=result.hits,
             top_score=result.top_score,
             model=model_name,
+            note=gap_note,
         )
     )

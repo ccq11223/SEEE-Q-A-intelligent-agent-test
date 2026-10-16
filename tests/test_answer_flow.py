@@ -109,6 +109,40 @@ class TestAnswerFlow(unittest.TestCase):
         answer = self.run_answer(store, FakeGenerator())
         self.assertEqual(answer.mode, MODE_HANDOFF)
 
+    def test_answer_without_citation_is_retried_with_clear_instruction(self) -> None:
+        # 实测：模型写出一段很好的回答但一个页码都没标，被引用校验拦下。
+        # 老代码在这种情况拼出的是「引用了参考资料中不存在的页码（）」这种空话。
+        store = FakeStore([hit(12)])
+        generator = FakeGenerator(
+            ["这个定理适用于线性电路和非线性电路。", "这个定理适用于线性电路（第 12 页）。"]
+        )
+        answer = self.run_answer(store, generator)
+        self.assertEqual(answer.mode, MODE_KB)
+        self.assertIn("第 12 页", generator.prompts[1])
+        self.assertIn("一个页码都没有标注", generator.prompts[1])
+        self.assertNotIn("不存在的页码（）", generator.prompts[1])
+
+    def test_answer_that_admits_a_gap_is_recorded(self) -> None:
+        # 实测：学生问「回转器怎么用在有源滤波器设计里」，模型老实说
+        # 「现有资料没有覆盖回转器」，然后列了资料里确实有的滤波器内容并标了页码。
+        # 这个回答诚实且有用，但走的是 kb 分支，缺口以前不会被记下来。
+        store = FakeStore([hit(12)])
+        generator = FakeGenerator(
+            [
+                "现有资料没有覆盖回转器，不过资料里有这些有源滤波器内容（第 12 页）。"
+            ]
+        )
+        answer = self.run_answer(store, generator)
+        self.assertEqual(answer.mode, MODE_KB)
+        self.assertEqual(store.gaps, ["节点电流定律是什么？"])
+        self.assertIn("知识缺口", answer.note)
+
+    def test_normal_kb_answer_records_no_gap(self) -> None:
+        store = FakeStore([hit(12)])
+        generator = FakeGenerator(["节点电流定律说明流入等于流出（第 12 页）。"])
+        self.run_answer(store, generator)
+        self.assertEqual(store.gaps, [])
+
 
 if __name__ == "__main__":
     unittest.main()

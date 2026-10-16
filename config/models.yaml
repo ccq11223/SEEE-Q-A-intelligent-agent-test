@@ -25,6 +25,8 @@ generate:
   name: deepseek-flash
   base_url: https://api.deepseek.com/v1
   api_key_env: DEEPSEEK_API_KEY
-  max_tokens: 1500
+  # 这两个 v4 模型都是推理模型：会先用 thinking 把额度花掉再写答案。
+  # 实测 1500 时答案会被截成空字符串（只剩 reasoning_content），所以给足额度。
+  max_tokens: 4096
   temperature: 0.2
   timeout_s: 120
