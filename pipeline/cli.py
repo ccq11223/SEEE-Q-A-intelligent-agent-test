@@ -6,6 +6,8 @@ import argparse
 import importlib
 import json
 import sys
+import unicodedata
+from pathlib import Path
 
 from .ai_parser import build_client, parse_document
 from .answer import answer_question
@@ -14,6 +16,13 @@ from .env import get_env
 from .llm import LLMError, ModelConfig, OpenAICompatClient
 from .manifest import ManifestEntry, ManifestError, load_manifest, select
 from .retrieval import retrieve
+from .register import (
+    AUTO_NOTE,
+    SUPPORTED_SUFFIXES,
+    append_rows,
+    build_drafts,
+    scan_files,
+)
 from .runner import (
     RunOptions,
     load_chunks,
@@ -51,6 +60,34 @@ def warn(message: str) -> None:
 
 def fail(message: str) -> None:
     print(f"[错误] {message}", file=sys.stderr, flush=True)
+
+
+def display_width(text: str) -> int:
+    """按终端显示宽度算长度：中文、全角标点占两格。"""
+    return sum(
+        2 if unicodedata.east_asian_width(char) in ("W", "F") else 1 for char in text
+    )
+
+
+def print_table(headers: list[str], rows: list[list[str]]) -> None:
+    """打印对齐的表格。中英混排时列宽按显示宽度算，避免中文列错位。"""
+    table = [[str(cell) for cell in row] for row in rows]
+    widths = [
+        max([display_width(header)] + [display_width(row[index]) for row in table])
+        for index, header in enumerate(headers)
+    ]
+
+    def render(cells: list[str]) -> str:
+        parts = [
+            cell + " " * (widths[index] - display_width(cell))
+            for index, cell in enumerate(cells)
+        ]
+        return "  ".join(parts).rstrip()
+
+    info(render(headers))
+    info(render(["-" * width for width in widths]))
+    for row in table:
+        info(render(row))
 
 
 def parse_pages(spec: str | None) -> set[int] | None:
@@ -210,14 +247,109 @@ def cmd_manifest(settings: Settings, args: argparse.Namespace) -> int:
     if not entries:
         warn(f"{manifest_path} 里还没有登记任何资料。")
         return 0
-    info(f"{'编号':<20}{'类型':<12}{'级别':<6}{'优先级':<6}{'文件状态':<10}标题")
-    for entry in entries:
-        raw = entry.local_path(settings.paths)
-        status = "网络资料" if entry.is_remote else ("已就位" if raw.is_file() else "缺文件")
-        info(
-            f"{entry.doc_key:<20}{entry.doc_type_label:<12}{entry.trust_level:<6}"
-            f"{entry.priority:<6}{status:<10}{entry.title}"
+    print_table(
+        ["编号", "类型", "级别", "优先级", "文件状态", "标题"],
+        [
+            [
+                entry.doc_key,
+                entry.doc_type_label,
+                str(entry.trust_level),
+                str(entry.priority),
+                "网络资料"
+                if entry.is_remote
+                else ("已就位" if entry.local_path(settings.paths).is_file() else "缺文件"),
+                entry.title,
+            ]
+            for entry in entries
+        ],
+    )
+    return 0
+
+
+def cmd_register(settings: Settings, args: argparse.Namespace) -> int:
+    """扫描 data/raw/，为未登记的文件生成台账草稿行。"""
+    from .manifest import DOC_TYPES, TRUST_LABELS
+
+    raw_dir = Path(args.dir) if args.dir else settings.paths.raw_dir
+    if not raw_dir.is_absolute():
+        raw_dir = (settings.root / raw_dir).resolve()
+
+    course_id = args.course or settings.default_course_id
+    settings.require_course(course_id)
+
+    if args.doc_type and args.doc_type not in DOC_TYPES:
+        fail(
+            f"--doc-type 不认识 {args.doc_type!r}。可选：{', '.join(sorted(DOC_TYPES))}"
         )
+        return 2
+    if args.trust_level is not None and args.trust_level not in (1, 2, 3):
+        fail("--trust-level 只能是 1 / 2 / 3")
+        return 2
+
+    files = scan_files(raw_dir, recursive=args.recursive)
+    if not files:
+        warn(
+            f"{raw_dir} 里没有找到可识别的资料文件。"
+            f"支持的格式：{', '.join(sorted(SUPPORTED_SUFFIXES))}"
+        )
+        return 0
+
+    manifest_path = Path(args.out) if args.out else settings.root / "config" / "manifest.csv"
+    existing = load_manifest(manifest_path) if manifest_path.is_file() else []
+    term = args.term or next(
+        (str(course.get("term") or "") for course in settings.courses if course.get("id") == course_id),
+        "",
+    )
+
+    drafts = build_drafts(
+        files,
+        course_id=course_id,
+        term=term,
+        existing=existing,
+        doc_type=args.doc_type,
+        trust_level=args.trust_level,
+    )
+
+    info(f"扫描目录：{raw_dir}")
+    info(f"发现 {len(files)} 个资料文件，其中 {len(files) - len(drafts)} 个已登记，{len(drafts)} 个待登记。")
+    if not drafts:
+        return 0
+
+    info("")
+    print_table(
+        ["编号", "类型", "可信级别", "文件名"],
+        [
+            [
+                draft.doc_key,
+                DOC_TYPES.get(draft.doc_type, draft.doc_type),
+                TRUST_LABELS.get(draft.trust_level, str(draft.trust_level)),
+                draft.filename,
+            ]
+            for draft in drafts
+        ],
+    )
+
+    guessed = [draft for draft in drafts if draft.notes]
+    info("")
+    if guessed:
+        warn(
+            f"其中 {len(guessed)} 行的类型是靠扩展名猜的（编号以 slide- 开头居多），"
+            f"请打开台账逐行确认。"
+        )
+
+    if args.dry_run:
+        info("")
+        info("dry-run：没有写入台账。确认无误后去掉 --dry-run 再跑一次。")
+        return 0
+
+    written = append_rows(manifest_path, drafts)
+    info("")
+    info(f"已追加 {written} 行到 {manifest_path}")
+    info(
+        "下一步：打开这个文件，逐行确认 doc_type（资料类型）与 trust_level（可信级别），"
+        f"确认完删掉 notes 里的「{AUTO_NOTE}」。"
+    )
+    info("然后用 python -m pipeline manifest 复核一遍。")
     return 0
 
 
@@ -555,6 +687,16 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("manifest", help="查看并校验资料台账")
     p.add_argument("--course", help="只看某门课")
 
+    p = sub.add_parser("register", help="步骤 1 辅助：扫描 data/raw，生成台账草稿行")
+    p.add_argument("--dir", help="要扫描的目录，默认 data/raw")
+    p.add_argument("--out", help="台账文件，默认 config/manifest.csv")
+    p.add_argument("--course", help="课程编号，默认取 config 里的 default_course_id")
+    p.add_argument("--term", help="学期，默认取该课程在 config 里的 term")
+    p.add_argument("--doc-type", help="强制指定资料类型（不填则按文件名猜）")
+    p.add_argument("--trust-level", type=int, choices=(1, 2, 3), help="强制指定可信级别")
+    p.add_argument("--recursive", action="store_true", help="递归扫描子目录")
+    p.add_argument("--dry-run", action="store_true", help="只预览，不写台账")
+
     p = sub.add_parser("render", help="步骤 2：课件 → 逐页图片")
     add_doc_args(p)
 
@@ -610,6 +752,7 @@ def main(argv: list[str] | None = None) -> int:
     handlers = {
         "doctor": cmd_doctor,
         "manifest": cmd_manifest,
+        "register": cmd_register,
         "render": cmd_render,
         "parse": cmd_parse,
         "chunk": cmd_chunk,

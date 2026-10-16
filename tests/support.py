@@ -6,12 +6,38 @@
 from __future__ import annotations
 
 import math
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
 from pipeline.settings import Settings
 from pipeline.store import Hit, Store
+
+CONFIG_FILES = ("pipeline.yaml", "models.yaml", "retrieval.yaml", "prompts.yaml")
+
+
+def copy_config_files(root: Path, *, embedding_dim: int | None = None) -> Path:
+    """把真实的 config/*.yaml 复制到临时工程目录，让 Settings.load 能跑通。
+
+    ``embedding_dim`` 用来把配置里的向量维度改成与假向量模型一致——
+    维度校验本身是真实功能，测试里不该绕过它，而应该给它正确的输入。
+    """
+    config_dir = root / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    project_root = Path(__file__).resolve().parents[1]
+    for name in CONFIG_FILES:
+        shutil.copy(project_root / "config" / name, config_dir / name)
+
+    if embedding_dim is not None:
+        models_path = config_dir / "models.yaml"
+        models_path.write_text(
+            models_path.read_text(encoding="utf-8").replace(
+                "dim: 1024", f"dim: {embedding_dim}"
+            ),
+            encoding="utf-8",
+        )
+    return config_dir
 
 
 @dataclass

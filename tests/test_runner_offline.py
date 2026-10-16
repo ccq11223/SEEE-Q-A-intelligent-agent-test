@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -20,9 +19,7 @@ from pipeline.runner import (
 )
 from pipeline.settings import Settings
 from pipeline.store import LocalStore
-from tests.support import FakeEmbedder, FakeModelConfig
-
-CONFIG_FILES = ("pipeline.yaml", "models.yaml", "retrieval.yaml", "prompts.yaml")
+from tests.support import FakeEmbedder, FakeModelConfig, copy_config_files
 
 PAGE_MARKDOWN = {
     1: "# 第 1 章 电路基本定律\n\n## 1.1 基尔霍夫定律\n\n节点电流定律：$\\sum i = 0$。\n\n[图 第1页-1：电路节点示意]",
@@ -57,18 +54,7 @@ class FakeVision:
 
 
 def build_project(root: Path) -> Path:
-    config_dir = root / "config"
-    config_dir.mkdir(parents=True, exist_ok=True)
-    project_root = Path(__file__).resolve().parents[1]
-    for name in CONFIG_FILES:
-        shutil.copy(project_root / "config" / name, config_dir / name)
-
-    # 假向量模型是 5 维，把配置里的维度改成一致，避免维度校验（这是它的职责）误报
-    models_path = config_dir / "models.yaml"
-    models_path.write_text(
-        models_path.read_text(encoding="utf-8").replace("dim: 1024", "dim: 5"),
-        encoding="utf-8",
-    )
+    config_dir = copy_config_files(root, embedding_dim=5)
 
     (config_dir / "manifest.csv").write_text(
         "doc_key,course_id,doc_type,trust_level,filename,title,term,priority,notes\n"

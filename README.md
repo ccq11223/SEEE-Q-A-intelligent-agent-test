@@ -26,10 +26,13 @@ Copy-Item .env.example .env
 # 3. 自检：会告诉你还差什么
 python -m pipeline doctor
 
-# 4. 登记资料：编辑 config/manifest.csv（参考 config/manifest.example.csv）
+# 4. 登记资料：扫一遍 data/raw 生成草稿，再人工确认类型与可信级别
+python -m pipeline register --dry-run    # 先预览，不写文件
+python -m pipeline register              # 写入 config/manifest.csv
+python -m pipeline manifest              # 复核
 
 # 5. 先跑几页试水，肉眼看看公式还原得怎么样
-python -m pipeline run --doc slide-ch01 --pages 1-5
+python -m pipeline run --doc slide-02 --pages 1-5 --dry-run
 
 # 6. 全量建库
 python -m pipeline run --all
@@ -38,7 +41,10 @@ python -m pipeline run --all
 python -m pipeline ask "节点电压法的适用条件是什么？"
 ```
 
-完整操作步骤见 [知识库构建指南.md](docs/知识库构建指南.md)。
+完整操作步骤：
+
+- [操作手册.md](docs/操作手册.md) —— **照着做**的逐步清单（在哪里点、粘什么、看到什么算成功）
+- [知识库构建指南.md](docs/知识库构建指南.md) —— 为什么这么做、验收标准、FAQ
 
 ## 目录结构
 
@@ -47,6 +53,7 @@ agent-code/
 ├── app/                 在线服务（阶段 2 开始填充）
 ├── pipeline/            离线建库流水线 ← 本阶段主体
 │   ├── manifest.py        步骤 1 资料登记与分级
+│   ├── register.py        步骤 1 辅助：扫描原始资料目录，生成台账草稿
 │   ├── convert.py         步骤 2 课件 → 逐页图片
 │   ├── ai_parser.py       步骤 3 视觉模型逐页结构化解析
 │   ├── sampler.py         步骤 4 人工抽查
@@ -85,12 +92,13 @@ agent-code/
 python -m unittest discover -s tests -t .
 ```
 
-68 项测试，全部离线：唯一的假件是「视觉模型」和「向量模型」，
+95 项测试，全部离线：唯一的假件是「视觉模型」和「向量模型」，
 渲染、切块、存储、检索走真实代码。
 
 ## 文档
 
 - [课程辅导智能体实施方案.md](docs/课程辅导智能体实施方案.md) —— 总体设计（v1.0）
+- [操作手册.md](docs/操作手册.md) —— 逐步操作清单（先看这份）
 - [云平台与账号准备.md](docs/云平台与账号准备.md) —— 选哪家云、开哪些账号、多少钱
 - [知识库构建指南.md](docs/知识库构建指南.md) —— 建库要做什么、怎么做、怎么验收
 - [db/README.md](db/README.md) —— 数据库建表步骤
