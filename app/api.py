@@ -42,9 +42,16 @@ def _image_label(services, doc: str, page: int) -> str:
     return f"《{title}》第 {page} 页" if title else f"课件第 {page} 页"
 
 
+class ChatTurn(BaseModel):
+    role: str = "user"
+    content: str = ""
+
+
 class AskRequest(BaseModel):
     anon_code: str = ""
     question: str = ""
+    #: 最近几轮对话，由前端带上；服务端不留历史，避免隐私问题
+    history: list[ChatTurn] = []
 
 
 class ImageRef(BaseModel):
@@ -145,6 +152,12 @@ def ask(payload: AskRequest, request: Request) -> AskResponse:
 
     session_id = services.store.ensure_session(services.course_id, anon_code)
 
+    history = [
+        {"role": turn.role, "content": turn.content[:600]}
+        for turn in payload.history[-6:]
+        if turn.role in ("user", "assistant") and turn.content.strip()
+    ]
+
     try:
         result = answer_question(
             services.settings,
@@ -155,6 +168,7 @@ def ask(payload: AskRequest, request: Request) -> AskResponse:
             course_id=services.course_id,
             rerank_client=services.rerank,
             session_id=session_id,
+            history=history,
         )
     except LLMError as exc:
         # 不把模型报错原文甩给学生；日志里能查到

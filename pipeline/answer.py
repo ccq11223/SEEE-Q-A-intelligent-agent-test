@@ -19,6 +19,7 @@ from __future__ import annotations
 import sys
 import time
 from dataclasses import dataclass, field
+from typing import Sequence
 
 from .llm import LLMError, OpenAICompatClient
 from .retrieval import (
@@ -54,6 +55,65 @@ SOURCE_LABELS = {
 #: 外部作答（联网/通用知识）的默认抬头。可在 config/retrieval.yaml 的 external 段改。
 DEFAULT_WEB_NOTE = "【网络搜索结果·未经审核，请与课件核对】"
 DEFAULT_GENERAL_NOTE = "【课件未覆盖·以下为通用知识解答，仅供参考】"
+
+#: 这些词说明当前这句是追问，脱离上一轮就说不清楚。
+#: 命中时把上一轮学生问题拼进检索查询，避免「不是，是那种……」被当成新问题。
+FOLLOWUP_MARKERS = (
+    "不是",
+    "那种",
+    "这个",
+    "那个",
+    "它",
+    "它们",
+    "刚才",
+    "上面",
+    "前面",
+    "还有",
+    "另外",
+    "接着",
+    "再说",
+    "换个",
+    "举例",
+)
+
+#: 拼进检索查询的历史上限（字），避免把整段对话塞进向量模型
+RETRIEVAL_HISTORY_CHARS = 200
+
+
+def build_retrieval_query(
+    question: str, history: Sequence[dict] | None = None
+) -> str:
+    """把追问和上一轮问题拼成一个自包含的检索查询。
+
+    只在这种句子明显依赖上文时才拼：否则会把无关的上一题带进来，
+    反而降低检索准确率。
+    """
+    query = (question or "").strip()
+    previous = [
+        str(item.get("content") or "").strip()
+        for item in (history or [])
+        if item.get("role") == "user" and str(item.get("content") or "").strip()
+    ]
+    if not previous:
+        return query
+    if not any(marker in query for marker in FOLLOWUP_MARKERS):
+        return query
+    context = " ".join(previous[-2:])[-RETRIEVAL_HISTORY_CHARS:]
+    return f"{context} {query}".strip()
+
+
+def _history_block(history: Sequence[dict] | None, *, limit: int = 4) -> str:
+    """给生成模型的对话上下文。只保留最近几轮，且每条截断。"""
+    turns: list[str] = []
+    for item in list(history or [])[-limit:]:
+        content = str(item.get("content") or "").strip()
+        if not content:
+            continue
+        role = "学生" if item.get("role") == "user" else "助教"
+        turns.append(f"{role}：{content[:400]}")
+    if not turns:
+        return ""
+    return "之前的对话（只用来理解当前问题，不要重复回答）：\n" + "\n".join(turns) + "\n\n"
 
 
 @dataclass
@@ -163,11 +223,14 @@ def answer_question(
     log: bool = True,
     rerank_client: OpenAICompatClient | None = None,
     session_id: int | None = None,
+    history: Sequence[dict] | None = None,
 ) -> Answer:
     started = time.perf_counter()
     course = course_id or settings.default_course_id
     course_name = settings.course_name(course)
     model_name = generate_client.config.name
+    retrieval_query = build_retrieval_query(question, history)
+    history_block = _history_block(history)
 
     def finish(answer: Answer) -> Answer:
         answer.latency_ms = int((time.perf_counter() - started) * 1000)
@@ -224,6 +287,7 @@ def answer_question(
         user = settings.prompt("qa_answer_external", "user").format(
             context_block=context_block, question=question
         )
+        user = history_block + user
         try:
             text = generate_client.chat(system=system, user=user)
         except LLMError as exc:
@@ -267,7 +331,7 @@ def answer_question(
             settings,
             store,
             embed_client,
-            question,
+            retrieval_query,
             course_id=course,
             rerank_client=rerank_client,
         )
@@ -286,6 +350,7 @@ def answer_question(
         user = settings.prompt("qa_answer", "user").format(
             context=context, question=question
         )
+        user = history_block + user
         allowed = result.allowed_pages
 
         text = ""

@@ -190,6 +190,8 @@ const $ = (id) => document.getElementById(id);
 const chat = $('chat');
 let config = { max_question_chars: 300 };
 let busy = false;
+// 只在浏览器里保留最近几轮，服务端不存；刷新页面即清空
+let history = [];
 
 fetch('/api/config').then(r => r.json()).then(c => {
   config = c;
@@ -312,7 +314,7 @@ async function send() {
     const resp = await fetch('/api/ask', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ anon_code: anon, question })
+      body: JSON.stringify({ anon_code: anon, question, history: history.slice(-6) })
     });
     const data = await resp.json();
     pending.remove();
@@ -321,6 +323,10 @@ async function send() {
       showError(data.detail || '请求失败，请稍后再试');
       return;
     }
+
+    history.push({ role: 'user', content: question });
+    history.push({ role: 'assistant', content: (data.answer || '').slice(0, 1200) });
+    if (history.length > 8) history = history.slice(-8);
 
     const level = data.source_level || data.mode || 'kb';
     const labelMap = {

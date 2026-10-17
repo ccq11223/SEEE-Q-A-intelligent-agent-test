@@ -4,7 +4,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from pipeline.answer import MODE_GENERAL, MODE_HANDOFF, MODE_KB, answer_question
+from pipeline.answer import (
+    MODE_GENERAL,
+    MODE_HANDOFF,
+    MODE_KB,
+    answer_question,
+    build_retrieval_query,
+)
 from pipeline.store import Hit
 from tests.support import FakeEmbedder, FakeGenerator, FakeStore, make_settings
 
@@ -45,6 +51,41 @@ class TestAnswerFlow(unittest.TestCase):
         self.assertTrue(answer.citation_valid)
         self.assertEqual(len(store.qa_logs), 1)
         self.assertEqual(store.gaps, [])
+
+    def test_followup_question_uses_previous_turn_for_retrieval(self) -> None:
+        history = [{"role": "user", "content": "怎么列写节点支路方程？"}]
+        store = FakeStore([hit(12)])
+        generator = FakeGenerator(["说明（第 12 页）。"])
+        answer_question(
+            self.settings,
+            store,
+            self.embedder,
+            generator,
+            "不是，是那种通用的结点方程",
+            history=history,
+        )
+        self.assertIn("怎么列写节点支路方程", self.embedder.calls[-1][0])
+        self.assertIn("不是，是那种通用的结点方程", self.embedder.calls[-1][0])
+        # 生成时也带上上下文，模型才知道「那种」指什么
+        self.assertIn("之前的对话", generator.prompts[0])
+
+    def test_standalone_question_is_not_polluted_by_history(self) -> None:
+        history = [{"role": "user", "content": "怎么理解特勒根定理？"}]
+        self.assertEqual(
+            build_retrieval_query("戴维南定理的适用条件是什么？", history),
+            "戴维南定理的适用条件是什么？",
+        )
+
+    def test_followup_query_keeps_recent_two_user_turns(self) -> None:
+        history = [
+            {"role": "user", "content": "第一问"},
+            {"role": "assistant", "content": "第一答"},
+            {"role": "user", "content": "第二问"},
+        ]
+        query = build_retrieval_query("那它呢？", history)
+        self.assertIn("第一问", query)
+        self.assertIn("第二问", query)
+        self.assertNotIn("第一答", query)
 
     def test_low_score_falls_back_to_general_and_records_gap(self) -> None:
         store = FakeStore([hit(12, score=0.05)])

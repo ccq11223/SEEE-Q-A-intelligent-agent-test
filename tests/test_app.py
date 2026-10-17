@@ -58,11 +58,12 @@ class AppTestCase(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         settings = make_settings(Path(self.tmp.name), **(settings_overrides or {}))
+        self.generator = FakeGenerator([reply])
         services = Services(
             settings=settings,
             store=FakeStore(hits if hits is not None else [make_hit()]),
             embed=FakeEmbedder(),
-            generate=FakeGenerator([reply]),
+            generate=self.generator,
             rerank=FakeReranker(rerank_score),
         )
         config = AppConfig(
@@ -125,6 +126,20 @@ class TestAsk(AppTestCase):
         client = self.build()
         self.assertEqual(client.get("/api/page-image/slide-07/12").status_code, 404)
         self.assertEqual(client.get("/api/page-image/bad%20doc/1").status_code, 400)
+
+    def test_followup_history_reaches_generation(self) -> None:
+        client = self.build()
+        resp = client.post(
+            "/api/ask",
+            json={
+                "anon_code": "xh-test",
+                "question": "不是，是那种通用的结点方程",
+                "history": [{"role": "user", "content": "怎么列写节点支路方程？"}],
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("之前的对话", self.generator.prompts[0])
+        self.assertIn("怎么列写节点支路方程", self.generator.prompts[0])
 
     def test_no_evidence_answers_from_general_knowledge(self) -> None:
         client = self.build(
