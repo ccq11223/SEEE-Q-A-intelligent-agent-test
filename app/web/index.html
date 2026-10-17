@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1f4e79">
 <title>课程答疑</title>
+<link rel="stylesheet" href="/static/katex/katex.min.css">
 <style>
   :root {
     --ink: #1c2430;
@@ -122,6 +123,34 @@
   #send:disabled { background: #b8c4d2; cursor: default; }
   .hint { margin: 8px 2px 0; font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; gap: 10px; }
   .error { color: #b3261e; font-size: 13px; margin-top: 8px; display: none; }
+
+  /* AI 回答的富文本：标题、列表、公式、表格、引用的课件图片 */
+  .bot .bubble > :first-child { margin-top: 0; }
+  .bot .bubble > :last-child { margin-bottom: 0; }
+  .bot .bubble h1, .bot .bubble h2, .bot .bubble h3 {
+    font-size: 15px; margin: 12px 0 6px; line-height: 1.4;
+  }
+  .bot .bubble p { margin: 6px 0; }
+  .bot .bubble ul, .bot .bubble ol { margin: 6px 0; padding-left: 20px; }
+  .bot .bubble li { margin: 3px 0; }
+  .bot .bubble blockquote {
+    margin: 8px 0; padding: 6px 10px;
+    border-left: 3px solid var(--brand);
+    background: var(--brand-soft); color: #42526b;
+  }
+  .bot .bubble code { background: #eef1f5; padding: 1px 5px; border-radius: 4px; font-family: Consolas, monospace; font-size: 13px; }
+  .bot .bubble pre { background: #f0f2f5; padding: 9px 11px; border-radius: 8px; overflow-x: auto; }
+  .bot .bubble pre code { background: transparent; padding: 0; }
+  .bot .bubble table { border-collapse: collapse; margin: 8px 0; width: 100%; }
+  .bot .bubble th, .bot .bubble td { border: 1px solid var(--line); padding: 5px 8px; font-size: 13px; }
+  .katex-display { overflow-x: auto; overflow-y: hidden; }
+  .figs { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+  .fig { margin: 0; }
+  .fig img {
+    max-width: 100%; border: 1px solid var(--line);
+    border-left: 3px solid #9a7fd1; border-radius: 8px; background: #fff;
+  }
+  .fig figcaption { font-size: 12px; color: var(--muted); margin-top: 3px; }
 </style>
 </head>
 <body>
@@ -151,6 +180,10 @@
   </footer>
 </div>
 
+<script src="/static/katex/katex.min.js"></script>
+<script src="/static/marked.min.js"></script>
+<script src="/static/purify.min.js"></script>
+<script src="/static/render.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const chat = $('chat');
@@ -183,8 +216,30 @@ function addMessage(text, who, meta) {
   box.className = 'msg ' + who;
   const bubble = document.createElement('div');
   bubble.className = 'bubble';
-  bubble.textContent = text;
+  if (who === 'bot') {
+    bubble.innerHTML = window.renderRich(text);
+  } else {
+    bubble.textContent = text;
+  }
   box.appendChild(bubble);
+  if (meta && meta.images && meta.images.length) {
+    const figs = document.createElement('div');
+    figs.className = 'figs';
+    meta.images.forEach((image) => {
+      const fig = document.createElement('figure');
+      fig.className = 'fig';
+      const pic = document.createElement('img');
+      pic.src = image.url;
+      pic.alt = image.label || '';
+      pic.loading = 'lazy';
+      const cap = document.createElement('figcaption');
+      cap.textContent = image.label || '';
+      fig.appendChild(pic);
+      fig.appendChild(cap);
+      figs.appendChild(fig);
+    });
+    box.appendChild(figs);
+  }
   if (meta) {
     const m = document.createElement('div');
     m.className = 'meta';
@@ -296,7 +351,8 @@ async function send() {
       level: level,
       tag: data.source_label || labelMap[level] || '',
       detail: detail,
-      sources: data.sources || []
+      sources: data.sources || [],
+      images: data.images || []
     });
     box.classList.add(level);
   } catch (err) {

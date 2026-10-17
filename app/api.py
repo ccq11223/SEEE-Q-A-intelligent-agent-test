@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from pipeline import websearch
@@ -15,11 +17,41 @@ router = APIRouter()
 
 #: 匿名代号只允许字母数字下划线连字符，避免有人填学号姓名
 ANON_CODE_RE = re.compile(r"^[A-Za-z0-9_\-]{2,16}$")
+#: 资料编号只允许字母数字下划线连字符，防止用 ../ 之类的路径越界
+DOC_KEY_RE = re.compile(r"^[A-Za-z0-9_\-]+$")
+
+
+def _doc_titles(services) -> dict[str, str]:
+    """资料编号 → 标题，来自 config/manifest.csv。"""
+    import csv
+
+    path = services.settings.root / "config" / "manifest.csv"
+    titles: dict[str, str] = {}
+    if not path.is_file():
+        return titles
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        for row in csv.DictReader(handle):
+            key = (row.get("doc_key") or "").strip()
+            if key:
+                titles[key] = (row.get("title") or "").strip()
+    return titles
+
+
+def _image_label(services, doc: str, page: int) -> str:
+    title = _doc_titles(services).get(doc, "")
+    return f"《{title}》第 {page} 页" if title else f"课件第 {page} 页"
 
 
 class AskRequest(BaseModel):
     anon_code: str = ""
     question: str = ""
+
+
+class ImageRef(BaseModel):
+    doc: str
+    page: int
+    url: str
+    label: str
 
 
 class AskResponse(BaseModel):
@@ -30,6 +62,7 @@ class AskResponse(BaseModel):
     answer: str
     citations: list[int] = []
     sources: list[str] = []
+    images: list[ImageRef] = []
     handoff: bool = False
     latency_ms: int = 0
     top_score: float = 0.0
@@ -48,6 +81,25 @@ def get_config(request: Request) -> dict[str, object]:
         "max_question_chars": cfg.max_question_chars,
         "course": services.course_name,
     }
+
+
+@router.get("/api/page-image/{doc_key}/{page_no}")
+def page_image(doc_key: str, page_no: int, request: Request) -> FileResponse:
+    """返回课件某一页的原图，给回答里「带出知识库图片」用。"""
+    if not DOC_KEY_RE.match(doc_key):
+        raise HTTPException(status_code=400, detail="非法资料编号")
+    if not (1 <= page_no <= 99999):
+        raise HTTPException(status_code=400, detail="非法页码")
+
+    services = request.app.state.services
+    pages_dir = Path(services.settings.paths.doc_pages(doc_key))
+    base = pages_dir / f"{doc_key}_page_{page_no:04d}"
+    image_path = base.with_suffix(".jpg")
+    if not image_path.is_file():
+        image_path = base.with_suffix(".png")
+    if not image_path.is_file():
+        raise HTTPException(status_code=404, detail="找不到这一页的课件图片")
+    return FileResponse(image_path, media_type="image/jpeg" if image_path.suffix == ".jpg" else "image/png")
 
 
 @router.get("/api/health")
@@ -118,6 +170,16 @@ def ask(payload: AskRequest, request: Request) -> AskResponse:
             detail="模型服务暂时不可用，请稍后再试，或直接找学长学姐",
         )
 
+    images = [
+        ImageRef(
+            doc=doc,
+            page=page,
+            url=f"/api/page-image/{doc}/{page}",
+            label=_image_label(services, doc, page),
+        )
+        for doc, page in result.image_pages
+    ]
+
     return AskResponse(
         mode=result.mode,
         source_level=result.source_level,
@@ -125,6 +187,7 @@ def ask(payload: AskRequest, request: Request) -> AskResponse:
         answer=result.text,
         citations=result.citations,
         sources=result.sources,
+        images=images,
         handoff=result.mode == "handoff",
         latency_ms=result.latency_ms,
         top_score=round(result.top_score, 4),

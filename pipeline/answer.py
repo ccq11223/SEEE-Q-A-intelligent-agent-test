@@ -70,6 +70,8 @@ class Answer:
     note: str = ""
     #: 联网作答时的来源链接，前端直接展示，学生可以点开核对
     sources: list[str] = field(default_factory=list)
+    #: 课件作答时引用的原页图片：(资料编号, 页码)。前端据此展示课件原图
+    image_pages: list[tuple[str, int]] = field(default_factory=list)
     #: 是否因模型调用失败而降级。降级时不能把「资料未覆盖」当成真的结论——
     #: 那会把「服务故障」说成「课件没有」，对学生是误导。
     failed: bool = False
@@ -121,6 +123,33 @@ def _labeled_block(title: str, content: str) -> str:
     if not body:
         return ""
     return f"{title}\n\n{body}\n\n"
+
+
+def collect_image_pages(
+    hits: list[Hit], citations: list[int], *, limit: int = 3
+) -> list[tuple[str, int]]:
+    """把回答引用的页码映射回「资料编号 + 页码」，用于取课件原图。
+
+    同一页码可能同时被多份资料的检索结果命中（各资料有自己的第 25 页），
+    这里按检索命中的块去对应，既不会拿错图，也不会把别份资料的图误附上去。
+    """
+    found: list[tuple[str, int]] = []
+    for page in citations:
+        for hit in hits:
+            if hit.page_no is None:
+                continue
+            end = hit.page_end or hit.page_no
+            if not (hit.page_no <= page <= end):
+                continue
+            doc_key = (hit.chunk_key or "").split("#", 1)[0]
+            if not doc_key:
+                continue
+            item = (doc_key, page)
+            if item not in found:
+                found.append(item)
+            if len(found) >= limit:
+                return found
+    return found
 
 
 def answer_question(
@@ -307,15 +336,17 @@ def answer_question(
             if mentions_missing_coverage(text) or has_external_supplement(text):
                 store.record_gap(course, question)
                 gap_note = "回答里明确说了资料未完全覆盖，已记入知识缺口清单"
+            cited_pages = extract_citation_pages(text)
             return finish(
                 Answer(
                     question=question,
                     mode=MODE_KB,
                     text=text,
-                    citations=extract_citation_pages(text),
+                    citations=cited_pages,
                     citation_valid=True,
                     hits=result.hits,
                     top_score=result.top_score,
+                    image_pages=collect_image_pages(result.hits, cited_pages),
                     model=model_name,
                     note=gap_note,
                 )

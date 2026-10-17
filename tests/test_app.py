@@ -115,6 +115,16 @@ class TestAsk(AppTestCase):
         self.assertFalse(data["handoff"])
         self.assertIn("第 12 页", data["answer"])
         self.assertEqual(data["citations"], [12])
+        # 课件作答要带回原页图片，前端据此「图文并茂」
+        self.assertEqual(len(data["images"]), 1)
+        self.assertEqual(data["images"][0]["doc"], "slide-07")
+        self.assertEqual(data["images"][0]["page"], 12)
+        self.assertEqual(data["images"][0]["url"], "/api/page-image/slide-07/12")
+
+    def test_page_image_endpoint_missing_and_bad_doc(self) -> None:
+        client = self.build()
+        self.assertEqual(client.get("/api/page-image/slide-07/12").status_code, 404)
+        self.assertEqual(client.get("/api/page-image/bad%20doc/1").status_code, 400)
 
     def test_no_evidence_answers_from_general_knowledge(self) -> None:
         client = self.build(
