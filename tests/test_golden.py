@@ -18,6 +18,7 @@ from pipeline.golden import (
     GoldenCase,
     GoldenError,
     GoldenReport,
+    build_worksheet,
     compose_question,
     describe_hits,
     extract_choice,
@@ -26,9 +27,11 @@ from pipeline.golden import (
     plan_status,
     point_covered,
     render_report,
+    run_golden,
     summarize_cases,
 )
 from pipeline.store import Hit
+from tests.support import FakeEmbedder, FakeGenerator, FakeStore
 
 
 def write_cases(rows: list[dict]) -> Path:
@@ -204,6 +207,86 @@ CHOICE = {
     "choices": ["必须有唯一解", "不能有电压源回路", "可以出现电流源节点", "应无耦合关系"],
     "expected_choice": "C",
 }
+
+
+class TestWorksheetAndDraftRuns(unittest.TestCase):
+    """填写闭环：工作单看原文 → 试跑草稿 → 满意再改 ready。"""
+
+    def setUp(self) -> None:
+        from tests.support import make_settings
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.settings = make_settings(self.root)
+        pages = self.settings.paths.doc_pages("doc-x")
+        pages.mkdir(parents=True, exist_ok=True)
+        for page_no in (10, 11):
+            (pages / f"doc-x_page_{page_no:04d}.md").write_text(
+                f"# 第{page_no}页内容\n\n叠加定理的定义。", encoding="utf-8"
+            )
+            (pages / f"doc-x_page_{page_no:04d}.jpg").write_bytes(b"\xff\xd8\xff\xd9")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def draft(self, **kwargs) -> GoldenCase:
+        base = dict(
+            id="draft-p09",
+            question="【待写·问答】叠加定理能不能叠加功率？",
+            expect_pages=[10, 11],
+            chapter="第4章 电路定理",
+            source_doc="doc-x",
+            status="draft",
+        )
+        base.update(kwargs)
+        return GoldenCase(**base)
+
+    def test_worksheet_includes_source_pages_and_image_paths(self) -> None:
+        text = build_worksheet([self.draft()], self.settings)
+        self.assertIn("draft-p09", text)
+        self.assertIn("# 第10页内容", text)
+        self.assertIn("doc-x_page_0010.jpg", text)
+        self.assertIn("预填的页码只是起点", text)
+
+    def test_worksheet_says_negative_has_no_pages(self) -> None:
+        case = GoldenCase(id="draft-n01", question="回转器怎么用？", negative=True, status="draft")
+        text = build_worksheet([case], self.settings)
+        self.assertIn("负样本", text)
+        self.assertIn("不该命中任何页", text)
+
+    def test_worksheet_flags_missing_page(self) -> None:
+        text = build_worksheet([self.draft(expect_pages=[99])], self.settings)
+        self.assertIn("找不到这一页", text)
+
+    def test_draft_can_be_run_when_explicitly_requested(self) -> None:
+        """草稿必须能试跑——否则「改之前先验」这个动作做不了。"""
+        from tests.support import FakeEmbedder
+
+        case = self.draft()
+        report = run_golden(
+            [case],
+            self.settings,
+            store=FakeStore([]),
+            embed_client=FakeEmbedder(),
+            generate_client=FakeGenerator(),
+            retrieval_only=True,
+            include_ids={"draft-p09"},
+        )
+        self.assertEqual(len(report.results), 1)
+        self.assertEqual(report.results[0].case.id, "draft-p09")
+
+    def test_draft_is_skipped_when_not_requested(self) -> None:
+        from tests.support import FakeEmbedder
+
+        report = run_golden(
+            [self.draft()],
+            self.settings,
+            store=FakeStore([]),
+            embed_client=FakeEmbedder(),
+            generate_client=FakeGenerator(),
+            retrieval_only=True,
+        )
+        self.assertEqual(report.results, [])
 
 
 class TestPlanStatus(unittest.TestCase):

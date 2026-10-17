@@ -52,7 +52,7 @@
 {"id": "draft-p08", "question": "【待写·选择】网孔电流法的适用范围，哪项正确？", "negative": false, "choices": ["选项A待写", "选项B待写"], "expected_choice": "A", "expect_pages": [2, 26], "expect_points": [], "chapter": "第3章 电路方程", "source_doc": "slide-06", "notes": "原文第2页「3.3 网孔分析法」、第26页适用范围", "status": "draft"}
 #
 # ---- 第4章 电路定理（slide-07/08/09）：问答2 + 选择1 ----
-{"id": "draft-p09", "question": "【待写·问答】叠加定理能不能用来叠加功率？为什么？", "negative": false, "expect_pages": [10, 11], "expect_points": [], "chapter": "第4章 电路定理", "source_doc": "slide-07", "notes": "原文第10-11页「2. 叠加定理的定义」「3. 几点说明」", "status": "draft"}
+{"id": "circuit-004", "question": "叠加定理能不能用来叠加功率？为什么？", "negative": false, "expect_pages": [12], "expect_points": ["功率不能叠加", "功率是电压和电流的乘积，是电源的二次函数", "p2 = (i2'+i2'')²R2 不等于 (i2')²R2 + (i2'')²R2"], "chapter": "第4章 电路定理", "source_doc": "slide-07", "notes": "【示范填写】原预填页码 [10,11] 并不含答案，实际在第12页的 (4)；依据原文「功率不能叠加（功率为电压和电流的乘积，为电源的二次函数）」", "status": "ready"}
 {"id": "draft-p10", "question": "【待写·问答】戴维南定理里的等效电压和等效电阻分别怎么求？", "negative": false, "expect_pages": [9, 13], "expect_points": [], "chapter": "第4章 电路定理", "source_doc": "slide-08", "notes": "原文第9页「定理的引出」、第13页戴维南定理证明", "status": "draft"}
 {"id": "draft-p11", "question": "【待写·选择】互易定理的三种形式，哪项适用条件正确？", "negative": false, "choices": ["选项A待写", "选项B待写"], "expected_choice": "A", "expect_pages": [7, 8, 10], "expect_points": [], "chapter": "第4章 电路定理", "source_doc": "slide-09", "notes": "原文第7-10页互易网络三种形式", "status": "draft"}
 #

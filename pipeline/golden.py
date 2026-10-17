@@ -317,6 +317,109 @@ def plan_status(cases: Sequence[GoldenCase]) -> PlanStatus:
     )
 
 
+#: 工作单里每页原文最多显示这么多字，太长会把文件撑爆
+WORKSHEET_PAGE_CHARS = 1100
+
+
+def build_worksheet(cases: Sequence[GoldenCase], settings: "Settings") -> str:
+    """生成填写工作单：把每个待填槽位和它对应的课件原文放在一起。
+
+    为什么需要它：填题集最费时间的是「在 JSON 和课件之间来回翻」。
+    把槽位、原文、图片路径排到同一个文件里，就能一次只盯一道题。
+    """
+    from .settings import Paths  # 仅用于类型提示，避免循环引用顾虑
+
+    paths: Paths = settings.paths
+    titles = {}
+    manifest = settings.root / "config" / "manifest.csv"
+    if manifest.is_file():
+        import csv
+
+        with manifest.open(encoding="utf-8-sig", newline="") as handle:
+            for row in csv.DictReader(handle):
+                titles[(row.get("doc_key") or "").strip()] = (row.get("title") or "").strip()
+
+    drafts = [case for case in cases if not case.scorable]
+    lines = [
+        "# 黄金测试集填写工作单",
+        "",
+        f"共 {len(drafts)} 个待填槽位。",
+        "",
+        "## 怎么用这份工作单",
+        "",
+        "1. 从上往下，一次只处理一道题；",
+        "2. 看下面的**原文解析结果**，判断这道题值不值得考、答案到底在哪几页；",
+        "3. 回到 `tests/golden/qa.jsonl` 改这一行：去掉【待写】、改成学生大白话、补 `expect_points`；",
+        "4. 想先试试，就在**还是 draft 状态**时跑：",
+        "   `python -m pipeline golden --only <id> --only-retrieval`（只测检索，便宜）",
+        "   或 `python -m pipeline golden --only <id>`（完整跑）；",
+        "5. 满意了再把 `status` 改成 `ready`；",
+        "6. 全部填完跑 `python -m pipeline golden --check` 看进度。",
+        "",
+        "> 负样本没有原文可看。确认它们是「课程内但课件确实没讲」的办法：",
+        "> `python -m pipeline golden --only <id> --only-retrieval` 会显示检索到的前几条，",
+        "> 打开那几页确认里面真的没有答案。",
+        "",
+        "> ⚠️ **预填的页码只是起点，不保证覆盖答案。** 它是按切块元数据里的章节范围推出来的，",
+        "> 可能只是「这一节从第10页开始」，而答案在第12页。以你下面看到的原文为准，",
+        "> 该改就改——`expect_pages` 填错了，这道题就会变成永久误报。",
+        "",
+        "---",
+        "",
+    ]
+
+    for number, case in enumerate(drafts, start=1):
+        kind = "负样本" if case.negative else ("选择题" if case.is_choice else "问答题")
+        lines.append(f"## {number}. `{case.id}` · {kind}")
+        lines.append("")
+        lines.append(f"- **当前题目**：{case.question}")
+        lines.append(f"- **章节**：{case.chapter or '（未标）'}")
+        if case.source_doc:
+            lines.append(
+                f"- **资料**：`{case.source_doc}`"
+                f"（{titles.get(case.source_doc, '')}）"
+            )
+        if case.negative:
+            lines.append("- **期望页码**：（负样本不填）")
+        else:
+            lines.append(f"- **期望页码**：第 {case.expect_pages} 页")
+        if case.notes:
+            lines.append(f"- **生成时的备注**：{case.notes}")
+        lines.append("")
+
+        if case.negative:
+            lines.append("> 这是负样本：它按定义不该命中任何页。")
+            lines.append("> 用 `--only-retrieval` 跑一次，确认检索到的页里确实没有答案。")
+            lines.append("")
+            lines.append("---")
+            lines.append("")
+            continue
+
+        for page_no in case.expect_pages:
+            page_path = (
+                paths.doc_pages(case.source_doc) / f"{case.source_doc}_page_{page_no:04d}.md"
+            )
+            image_path = page_path.with_suffix(".jpg")
+            lines.append(f"### 第 {page_no} 页")
+            lines.append("")
+            if image_path.is_file():
+                lines.append(f"原页图片：`{image_path}`")
+                lines.append("")
+            if not page_path.is_file():
+                lines.append("（找不到这一页的解析结果，可能页码填错了）")
+                lines.append("")
+                continue
+            text = page_path.read_text(encoding="utf-8").strip()
+            if len(text) > WORKSHEET_PAGE_CHARS:
+                text = text[:WORKSHEET_PAGE_CHARS] + "\n……（后面还有，篇幅原因省略）"
+            lines.extend(["```markdown", text, "```", ""])
+
+        lines.append("---")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 def compose_question(case: GoldenCase) -> str:
     """把选择题的选项拼进问题里。
 
@@ -603,10 +706,18 @@ def run_golden(
     retrieval_only: bool = False,
     progress: Callable[[CaseResult, int, int], None] | None = None,
     limit: int | None = None,
+    include_ids: set[str] | None = None,
 ) -> GoldenReport:
+    """跑题集。
+
+    ``include_ids`` 是给「试跑草稿」用的：默认只跑 status=ready 的题，
+    但你需要在把一道题改成 ready **之前**先试一下它能不能答、页码对不对。
+    显式点了 id 就应当跑，不受 status 限制。
+    """
     started = time.perf_counter()
     report = GoldenReport(retrieval_only=retrieval_only)
-    targets = [case for case in cases if case.scorable]
+    wanted = include_ids or set()
+    targets = [case for case in cases if case.scorable or case.id in wanted]
     if limit:
         targets = targets[:limit]
     for index, case in enumerate(targets, start=1):

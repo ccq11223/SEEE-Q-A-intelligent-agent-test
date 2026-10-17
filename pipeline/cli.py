@@ -617,6 +617,7 @@ def cmd_golden(settings: Settings, args: argparse.Namespace) -> int:
 
     from .golden import (
         GoldenError,
+        build_worksheet,
         load_cases,
         plan_status,
         render_report,
@@ -659,6 +660,20 @@ def cmd_golden(settings: Settings, args: argparse.Namespace) -> int:
             info(f"  {case.status:<5} {case.id:<16} {kind:<26} {case.question}")
         info("")
         info("格式校验通过。加 --only-retrieval 可以只测检索（最便宜）。")
+        return 0
+
+    if args.worksheet:
+        target = (
+            Path(args.worksheet)
+            if args.worksheet not in ("", "auto")
+            else settings.root / "tests" / "golden" / "填写工作单.md"
+        )
+        target.write_text(build_worksheet(cases, settings), encoding="utf-8")
+        info(f"填写工作单已写入：{target.resolve()}")
+        info(
+            "打开它，一个槽位一个槽位地看原文、改 qa.jsonl；"
+            "改完想试就跑 golden --only <id>。"
+        )
         return 0
 
     store = open_store(settings)
@@ -726,6 +741,7 @@ def cmd_golden(settings: Settings, args: argparse.Namespace) -> int:
             generator,
             retrieval_only=args.only_retrieval,
             progress=show,
+            include_ids=set(args.only or []),
         )
     except LLMError as exc:
         fail(str(exc))
@@ -1209,6 +1225,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--file", help="题集文件，默认 tests/golden/qa.jsonl")
     p.add_argument("--check", action="store_true", help="只校验题集格式，不联网")
+    p.add_argument(
+        "--worksheet",
+        nargs="?",
+        const="auto",
+        help="生成填写工作单（槽位 + 对应课件原文放一起），可选指定输出路径",
+    )
     p.add_argument(
         "--only-retrieval",
         action="store_true",
