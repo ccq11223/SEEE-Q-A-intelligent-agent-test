@@ -255,6 +255,68 @@ def summarize_cases(cases: Sequence[GoldenCase]) -> str:
     )
 
 
+#: 题集规模目标（方案 §8.1：30-50 题，负样本不少于 10 道）。
+#: 选择题按「约占正样本的 1/4」定，因为它能机械判分，性价比最高。
+PLAN_TARGETS = {
+    "total": 40,
+    "positive": 30,
+    "negative": 10,
+    "choice": 8,
+}
+
+
+@dataclass
+class PlanStatus:
+    """题集离「够用」还差多少。骨架的意义就在于让这个差距一直是可见的。"""
+
+    ready_positive: int = 0
+    ready_negative: int = 0
+    ready_choice: int = 0
+    drafts: int = 0
+
+    @property
+    def ready_total(self) -> int:
+        return self.ready_positive + self.ready_negative
+
+    @property
+    def missing(self) -> dict[str, int]:
+        return {
+            "正样本": max(0, PLAN_TARGETS["positive"] - self.ready_positive),
+            "负样本": max(0, PLAN_TARGETS["negative"] - self.ready_negative),
+            "选择题": max(0, PLAN_TARGETS["choice"] - self.ready_choice),
+        }
+
+    @property
+    def complete(self) -> bool:
+        return not any(self.missing.values())
+
+    def lines(self) -> list[str]:
+        out = [
+            f"目标：{PLAN_TARGETS['total']} 题"
+            f"（正样本 {PLAN_TARGETS['positive']}、负样本 {PLAN_TARGETS['negative']}、"
+            f"其中选择题 {PLAN_TARGETS['choice']}）",
+            f"当前：已就绪 {self.ready_total} 题"
+            f"（正 {self.ready_positive}、负 {self.ready_negative}、"
+            f"选择题 {self.ready_choice}），草稿 {self.drafts} 题",
+        ]
+        if self.complete:
+            out.append("进度：已达标。每次改动后跑 `python -m pipeline golden` 做回归。")
+        else:
+            gap = "、".join(f"{name} {count} 道" for name, count in self.missing.items() if count)
+            out.append(f"进度：还差 {gap}。")
+        return out
+
+
+def plan_status(cases: Sequence[GoldenCase]) -> PlanStatus:
+    ready = [case for case in cases if case.scorable]
+    return PlanStatus(
+        ready_positive=sum(1 for case in ready if not case.negative),
+        ready_negative=sum(1 for case in ready if case.negative),
+        ready_choice=sum(1 for case in ready if case.is_choice and not case.negative),
+        drafts=sum(1 for case in cases if not case.scorable),
+    )
+
+
 def compose_question(case: GoldenCase) -> str:
     """把选择题的选项拼进问题里。
 

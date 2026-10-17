@@ -618,6 +618,7 @@ def cmd_golden(settings: Settings, args: argparse.Namespace) -> int:
     from .golden import (
         GoldenError,
         load_cases,
+        plan_status,
         render_report,
         run_golden,
         summarize_cases,
@@ -639,6 +640,9 @@ def cmd_golden(settings: Settings, args: argparse.Namespace) -> int:
 
     info(f"题集：{path}")
     info(summarize_cases(cases))
+    status = plan_status(cases)
+    for line in status.lines():
+        info(line)
     if args.only:
         wanted = set(args.only)
         known = {case.id for case in cases}

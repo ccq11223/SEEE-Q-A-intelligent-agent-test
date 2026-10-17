@@ -13,6 +13,7 @@ import unittest
 from pathlib import Path
 
 from pipeline.golden import (
+    PLAN_TARGETS,
     CaseResult,
     GoldenCase,
     GoldenError,
@@ -22,6 +23,7 @@ from pipeline.golden import (
     extract_choice,
     load_cases,
     pages_from_hits,
+    plan_status,
     point_covered,
     render_report,
     summarize_cases,
@@ -202,6 +204,59 @@ CHOICE = {
     "choices": ["必须有唯一解", "不能有电压源回路", "可以出现电流源节点", "应无耦合关系"],
     "expected_choice": "C",
 }
+
+
+class TestPlanStatus(unittest.TestCase):
+    """骨架的意义：让「还差多少题」一直是可见的，而不是靠记忆。"""
+
+    def test_counts_ready_and_drafts_separately(self) -> None:
+        ready_pos = GoldenCase(id="p1", question="q", expect_pages=[1])
+        ready_neg = GoldenCase(id="n1", question="q", negative=True)
+        ready_choice = GoldenCase(
+            id="c1",
+            question="q",
+            expect_pages=[1],
+            choices=["甲", "乙"],
+            expected_choice="A",
+        )
+        draft = GoldenCase(id="d1", question="q", status="draft")
+        status = plan_status([ready_pos, ready_neg, ready_choice, draft])
+        self.assertEqual(status.ready_positive, 2)
+        self.assertEqual(status.ready_negative, 1)
+        self.assertEqual(status.ready_choice, 1)
+        self.assertEqual(status.drafts, 1)
+        self.assertEqual(status.ready_total, 3)
+
+    def test_reports_remaining_quota(self) -> None:
+        status = plan_status([GoldenCase(id="p1", question="q", expect_pages=[1])])
+        self.assertFalse(status.complete)
+        self.assertEqual(
+            status.missing["负样本"], PLAN_TARGETS["negative"]
+        )
+        self.assertEqual(
+            status.missing["正样本"], PLAN_TARGETS["positive"] - 1
+        )
+
+    def test_complete_when_all_targets_met(self) -> None:
+        cases = []
+        for index in range(PLAN_TARGETS["positive"]):
+            is_choice = index < PLAN_TARGETS["choice"]
+            cases.append(
+                GoldenCase(
+                    id=f"p{index}",
+                    question="q",
+                    expect_pages=[1],
+                    choices=["甲", "乙"] if is_choice else [],
+                    expected_choice="A" if is_choice else "",
+                )
+            )
+        for index in range(PLAN_TARGETS["negative"]):
+            cases.append(GoldenCase(id=f"n{index}", question="q", negative=True))
+        status = plan_status(cases)
+        self.assertTrue(status.complete)
+        self.assertTrue(
+            any("已达标" in line for line in status.lines())
+        )
 
 
 class TestChoiceQuestions(unittest.TestCase):
