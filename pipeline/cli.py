@@ -1171,6 +1171,48 @@ def cmd_ask(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_webcheck(settings: Settings, args: argparse.Namespace) -> int:
+    """联网自检：只打一次搜索接口，不调用生成模型，几乎不花钱。"""
+    from . import websearch
+
+    providers = websearch.configured_providers()
+    if not providers:
+        fail(
+            "还没有配置联网搜索。任选一个填进 .env，然后重开终端：\n"
+            "  BOCHA_API_KEY=...        博查，中文资料好、国内可直连\n"
+            "  TAVILY_API_KEY=tvly-...  Tavily，Key 一定以 tvly- 开头\n"
+            "  SEARXNG_URL=https://...  自建 SearXNG（需开 JSON 输出）"
+        )
+        return 1
+
+    info(f"已配置的搜索服务：{', '.join(providers)}")
+
+    # 最常见的错误不是「没配」，而是「把别的 Key 复制到了这一行」。
+    # 这里先做一次肉眼可懂的检查，省得对着 401 猜半天。
+    tavily_key = get_env("TAVILY_API_KEY")
+    if tavily_key and not tavily_key.startswith("tvly-"):
+        warn("TAVILY_API_KEY 看起来不像 Tavily 的 Key（正常以 tvly- 开头）")
+        if tavily_key == get_env("DEEPSEEK_API_KEY"):
+            warn("它和 DEEPSEEK_API_KEY 一模一样——多半是复制错了行")
+        if tavily_key == get_env("SILICONFLOW_API_KEY"):
+            warn("它和 SILICONFLOW_API_KEY 一模一样——多半是复制错了行")
+
+    try:
+        result = websearch.search(args.query, max_results=args.max_results)
+    except websearch.WebSearchUnavailable as exc:
+        fail(f"联网失败：{exc}")
+        return 1
+
+    info(f"服务：{result.provider}｜返回 {len(result.hits)} 条")
+    if result.answer:
+        info(f"\n摘要：{result.answer[:300]}")
+    for index, hit in enumerate(result.hits, start=1):
+        info(f"  {index}. {hit.title}")
+        info(f"     {hit.url}")
+    info("\n联网通道正常。学生问课件外的问题时，会用这一档作答并附上来源。")
+    return 0
+
+
 def cmd_stats(settings: Settings, args: argparse.Namespace) -> int:
     store = open_store(settings)
     course_id = getattr(args, "course", None) or settings.default_course_id
@@ -1316,6 +1358,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--course")
     p.add_argument("--no-rerank", action="store_true", help="关闭重排，对比纯向量的效果")
 
+    p = sub.add_parser("webcheck", help="联网自检：确认搜索 Key 能用（不调用生成模型）")
+    p.add_argument("query", nargs="?", default="电路理论 替代定理")
+    p.add_argument("--max-results", type=int, default=3)
+
     p = sub.add_parser("stats", help="知识库统计")
     p.add_argument("--course")
 
@@ -1348,6 +1394,7 @@ def main(argv: list[str] | None = None) -> int:
         "sample": cmd_sample,
         "search": cmd_search,
         "ask": cmd_ask,
+        "webcheck": cmd_webcheck,
         "stats": cmd_stats,
     }
 
