@@ -1,100 +1,109 @@
 # 黄金测试集 —— 一行一题，格式说明见同目录 README.md 与 骨架.md
 # 以 # 开头的行会被忽略。
 #
-# 规模目标：40 题 = 正样本 30（其中选择题 8）+ 负样本 10
-# 当前进度跑 `python -m pipeline golden --check` 看。
-# status=ready 参与计分；status=draft 是待你填的槽位。
+# 全部 40 题已按课件原文填好，你可以直接删改。
+# 跑 `python -m pipeline golden --check` 看进度，`python -m pipeline golden` 跑回归。
+#
+# 规模：正样本 30（问答 22 + 选择 8）+ 负样本 10 = 40
+# 每条 notes 里写了「依据哪一页的哪句话」，改的时候对着看。
 #
 # ============================================================
-# 已核实区：8 题。页码与答案都对着原文核过，可以直接用
+# 第1章 电路模型与基本定律（slide-04）
 # ============================================================
+{"id": "circuit-005", "question": "什么情况下电路可以按集中参数电路来分析？集中参数分析默认了哪几条假设？", "negative": false, "expect_pages": [11], "expect_points": ["电路尺寸远小于工作电磁波波长，实用标准 d_max < 0.01λ_min", "电磁波传播时间可忽略，瞬间传遍整个系统", "每个电器件净电荷为零", "不同电器件之间不存在磁耦合"], "chapter": "第1章 电路模型与基本定律", "source_doc": "slide-04", "notes": "依据第11页「集中参数电路分析的假设」三条，以及「实用标准 d_max < 0.01λ_min」", "status": "ready"}
+{"id": "circuit-006", "question": "电流的实际方向是怎么规定的？为什么复杂电路里不好直接判断方向？", "negative": false, "expect_pages": [13], "expect_points": ["规定正电荷的运动方向为电流的实际方向", "复杂电路或电流随时间变化时，实际方向往往很难事先判断"], "chapter": "第1章 电路模型与基本定律", "source_doc": "slide-04", "notes": "依据第13页「方向」：正电荷运动方向为实际方向；复杂电路难事先判断", "status": "ready"}
+{"id": "choice-004", "question": "关于理想元件的理想化原则，下列哪一项是错误的？", "negative": false, "choices": ["认为元件没有空间大小", "认为元件只呈现一种电磁现象", "认为元件的电压电流特性可以用严格的数学表达式描述", "认为理想元件的参数会随工作状态任意变化"], "expected_choice": "D", "expect_pages": [7], "expect_points": [], "chapter": "第1章 电路模型与基本定律", "source_doc": "slide-04", "notes": "依据第7页「理想化的三大原则」三条；D 与「严格数学表达式描述」直接矛盾", "status": "ready"}
 #
-# ---- 第4章 电路定理 ----
-{"id": "circuit-001", "question": "替代定理的适用条件是什么？", "negative": false, "expect_pages": [25, 26], "expect_points": ["原电路与替代后的电路都必须有唯一解", "替代后不能出现电压源回路", "替代后不能出现电流源节点（含广义节点）", "被替代支路与其他部分应无耦合关系", "未被替代支路的连接与参数不能改变"], "chapter": "第4章 电路定理", "source_doc": "slide-07", "notes": "实测通过：检索 0.687，引用（第25/26/22/23页）全部有效", "status": "ready"}
-{"id": "choice-001", "question": "下列关于替代定理应用条件的说法，哪一项是错误的？", "negative": false, "choices": ["原电路和替代后的电路都必须有唯一解", "替代后的电路不能有电压源回路", "替代后的电路可以出现电流源节点", "被替代的支路与电路其它部分应无耦合关系"], "expected_choice": "C", "expect_pages": [25, 26], "expect_points": [], "chapter": "第4章 电路定理", "source_doc": "slide-07", "notes": "依据原文第26页「无电压源回路；无电流源节点（含广义节点）」", "status": "ready"}
+# ============================================================
+# 第2章 电阻电路等效变换（slide-05）
+# ============================================================
+{"id": "circuit-007", "question": "两个内部结构完全不同的二端电路，什么情况下可以认为它们等效？", "negative": false, "expect_pages": [9, 10, 11], "expect_points": ["端口伏安特性（外特性）完全相同", "对连接在其上的任何外电路作用效果相同", "只在一个工作点的电压电流相同不算等效"], "chapter": "第2章 电阻电路等效变换", "source_doc": "slide-05", "notes": "依据第9页外特性定义、第10页等效定义、第11页「仅一点不行」", "status": "ready"}
+{"id": "circuit-008", "question": "串联电阻的分压公式和并联电阻的分流公式分别怎么写？它们各自和什么成正比？", "negative": false, "expect_pages": [15, 19], "expect_points": ["串联：Uk = (Rk/Req)·U，电压与电阻成正比", "两电阻串联：U1 = R1/(R1+R2)·U", "并联：Ik = (Gk/Geq)·I，电流与电导成正比", "两电阻并联：I1 = R2/(R1+R2)·I"], "chapter": "第2章 电阻电路等效变换", "source_doc": "slide-05", "notes": "依据第15页「串联电阻上电压的分配」、第19页「并联电阻的分流」", "status": "ready"}
+{"id": "choice-005", "question": "关于二端电路的等效，下列说法哪一项是正确的？", "negative": false, "choices": ["两个电路内部结构相同才叫等效", "只要在某个工作点的电压电流相同就算等效", "两个电路的端口伏安特性完全相同才算等效", "等效的两个电路内部各元件消耗的功率也一定相同"], "expected_choice": "C", "expect_pages": [10, 11], "expect_points": [], "chapter": "第2章 电阻电路等效变换", "source_doc": "slide-05", "notes": "依据第10页等效定义、第11页「相同的端口伏安特性（仅一点不行）」", "status": "ready"}
 #
-# ---- 第3章 电路方程 ----
-{"id": "circuit-002", "question": "支路分析法列方程的一般步骤是什么？", "negative": false, "expect_pages": [10], "expect_points": ["标定各支路电流的参考方向", "选 n-1 个独立结点列 KCL 方程", "选 b-n+1 个独立回路列 KVL 方程", "求解得到 b 个支路电流"], "chapter": "第3章 电路方程", "source_doc": "slide-06", "notes": "依据第10页「支路法的一般步骤」四条", "status": "ready"}
+# ============================================================
+# 第3章 电路方程（slide-06）
+# ============================================================
+{"id": "circuit-002", "question": "支路分析法列方程的一般步骤是什么？", "negative": false, "expect_pages": [10], "expect_points": ["标定各支路电流（电压）的参考方向", "选 n-1 个独立结点，列写 KCL 方程", "选 b-n+1 个独立回路，列写 KVL 方程", "求解方程得到 b 个支路电流"], "chapter": "第3章 电路方程", "source_doc": "slide-06", "notes": "依据第10页「支路法的一般步骤」四条", "status": "ready"}
+{"id": "circuit-009", "question": "结点电压法遇到两个结点之间接理想电压源（无伴电压源）时怎么处理？", "negative": false, "expect_pages": [33], "expect_points": ["先设该电压源支路的电流为未知量 I，按常规列结点方程", "再增补一个结点电压与电压源的关系式（例如 U1 - U3 = Us）"], "chapter": "第3章 电路方程", "source_doc": "slide-06", "notes": "依据第33页「特殊情况2」方法1：以电压源电流为变量，增补结点电压与电压源的关系", "status": "ready"}
+{"id": "choice-006", "question": "列写结点电压方程时，等式右边电流源电流的正负号怎么定？", "negative": false, "choices": ["流入结点取正号，流出取负号", "流入结点取负号，流出取正号", "一律取正号", "由电压源的极性决定"], "expected_choice": "A", "expect_pages": [26], "expect_points": [], "chapter": "第3章 电路方程", "source_doc": "slide-06", "notes": "依据第26页原文「电流源电流流入结点取正号，流出取负号」", "status": "ready"}
 #
-# ---- 第8章 一阶电路 ----
+# ============================================================
+# 第4章 电路定理（slide-07 / slide-08 / slide-09）
+# ============================================================
+{"id": "circuit-001", "question": "替代定理的适用条件是什么？", "negative": false, "expect_pages": [25, 26], "expect_points": ["原电路与替代后的电路都必须有唯一解", "替代后不能出现电压源回路", "替代后不能出现电流源节点（含广义节点）", "被替代支路与其他部分应无耦合关系", "未被替代支路的连接与参数不能改变"], "chapter": "第4章 电路定理", "source_doc": "slide-07", "notes": "依据第25-26页「注：适用范围」五条；实测检索 0.687，引用 [25,26,22,23] 全部有效", "status": "ready"}
+{"id": "circuit-004", "question": "叠加定理能不能用来叠加功率？为什么？", "negative": false, "expect_pages": [12], "expect_points": ["功率不能叠加", "功率是电压和电流的乘积，是电源的二次函数", "p2 = (i2'+i2'')²R2 不等于 (i2')²R2 + (i2'')²R2"], "chapter": "第4章 电路定理", "source_doc": "slide-07", "notes": "依据第12页「(4) 功率不能叠加（功率为电压和电流的乘积，为电源的二次函数）」；注意答案不在第10-11页", "status": "ready"}
+{"id": "circuit-010", "question": "戴维南定理说的是什么？等效电压和等效电阻分别怎么求？", "negative": false, "expect_pages": [9, 13], "expect_points": ["线性含源二端网络对外可等效为电压源 Uoc 与电阻 Req 串联", "Uoc 是端口的开路电压", "Req 是把网络内独立源置零后从端口看进去的等效电阻", "端口电压 uAB = Uoc - Req·i"], "chapter": "第4章 电路定理", "source_doc": "slide-08", "notes": "依据第9页定理引出、第13页证明中的 uAB = Uoc - Req i 与「网络N中所有独立源置零→N0」", "status": "ready"}
+{"id": "choice-001", "question": "下列关于替代定理应用条件的说法，哪一项是错误的？", "negative": false, "choices": ["原电路和替代后的电路都必须有唯一解", "替代后的电路不能有电压源回路", "替代后的电路可以出现电流源节点", "被替代的支路与电路其它部分应无耦合关系"], "expected_choice": "C", "expect_pages": [25, 26], "expect_points": [], "chapter": "第4章 电路定理", "source_doc": "slide-07", "notes": "依据第26页「无电压源回路；无电流源节点（含广义节点）」", "status": "ready"}
+{"id": "choice-007", "question": "关于互易定理的适用条件，下列哪一项是正确的？", "negative": false, "choices": ["网络只含线性电阻元件，不含独立电源和受控电源", "网络可以含独立电源，只要不含受控电源", "网络必须是单口网络", "网络含受控电源时互易定理依然成立"], "expected_choice": "A", "expect_pages": [7], "expect_points": [], "chapter": "第4章 电路定理", "source_doc": "slide-09", "notes": "依据第7页：互易网络是二端口网络，仅含线性电阻元件，不含独立电源和受控电源", "status": "ready"}
+#
+# ============================================================
+# 第7章 一阶电路（slide-10）
+# ============================================================
+{"id": "circuit-011", "question": "单位阶跃函数长什么样？它在电路分析里主要用来做什么？", "negative": false, "expect_pages": [5, 7], "expect_points": ["ε(t) 在 t>0 时为 1、t<0 时为 0", "延时形式 ε(t-t0) 表示在 t0 时刻发生跳变", "常用来表示电源从某一时刻起接入电路"], "chapter": "第7章 一阶电路", "source_doc": "slide-10", "notes": "依据第5页定义与延时形式、第7页「用来表示电源从某时刻起接入电路」", "status": "ready"}
+#
+# ============================================================
+# 第8章 一阶电路（slide-11）
+# ============================================================
+{"id": "circuit-012", "question": "RC 电路的时间常数是什么？它反映了什么？单位为什么是秒？", "negative": false, "expect_pages": [7, 8], "expect_points": ["τ = RC", "反映零输入响应的衰减速率、过渡过程时间的长短", "量纲为欧·法，化简后是秒", "响应按 y(t) = y(0+)·e^(-t/RC) 衰减"], "chapter": "第8章 一阶电路", "source_doc": "slide-11", "notes": "依据第8页「时间常数 τ=RC」「反映衰减速率」及量纲推导；第7页指数衰减式", "status": "ready"}
 {"id": "circuit-003", "question": "三要素法求一阶电路响应的步骤是什么？使用条件有哪些？", "negative": false, "expect_pages": [41, 42], "expect_points": ["只适用于一阶动态电路（RC、RL）", "输入信号必须恒定", "求初始值、稳态值、时间常数三个要素", "代入三要素公式写出响应"], "chapter": "第8章 一阶电路", "source_doc": "slide-11", "notes": "实测通过：检索 0.774，命中「3. 一阶电路分析的三要素法」", "status": "ready"}
+{"id": "choice-008", "question": "关于零输入响应、零状态响应和全响应，下列哪一项是正确的？", "negative": false, "choices": ["零输入响应是外加激励为零、仅由动态元件初始储能引起的响应", "零状态响应是初始储能不为零、外加激励也为零的响应", "全响应是只在初始储能作用下产生的响应", "零状态响应与外加输入激励无关"], "expected_choice": "A", "expect_pages": [4], "expect_points": [], "chapter": "第8章 一阶电路", "source_doc": "slide-11", "notes": "依据第4页三种响应的定义", "status": "ready"}
 #
-# ---- 第10章 正弦稳态 ----
+# ============================================================
+# 第10章 正弦稳态（slide-01 / slide-02）
+# ============================================================
+{"id": "circuit-013", "question": "两个同频率正弦量的相位差怎么算？算出来正数和负数分别说明什么？", "negative": false, "expect_pages": [9, 10], "expect_points": ["相位差等于两个初相位之差：φ = φu - φi", "φ>0 表示 u 超前 i", "φ<0 表示 i 超前 u", "|φ| ≥ π 时先按 φ±2π 换算到 |φ| ≤ π 再判断"], "chapter": "第10章 正弦稳态", "source_doc": "slide-01", "notes": "依据第9页相位差定义与超前/滞后、第10页 |φ|≥π 的换算办法", "status": "ready"}
+{"id": "circuit-014", "question": "位形相量图和普通相量图有什么不同？", "negative": false, "expect_pages": [4, 5], "expect_points": ["位形相量图用复平面上的点表示电路中各点电位", "位形图只适用于电压相量，与电路图中的点一一对应", "两点之间的矢量就是两点间的电压相量", "相量图的各相量可自由移动，位形图不行"], "chapter": "第10章 正弦稳态", "source_doc": "slide-02", "notes": "依据第4页定义「位形相量图是电压相量图的另一种形式」、第5页两张图的逐条对比", "status": "ready"}
 {"id": "choice-002", "question": "关于感抗和容抗随频率的变化，下列哪一项是正确的？", "negative": false, "choices": ["直流下电感相当于开路，电容相当于短路", "直流下电感相当于短路，电容相当于开路", "频率升高时感抗减小，容抗增大", "频率升高时感抗和容抗都增大"], "expected_choice": "B", "expect_pages": [25, 26], "expect_points": [], "chapter": "第10章 正弦稳态", "source_doc": "slide-01", "notes": "依据原文：电感 ω=0 时 X_L=0（短路）、ω→∞ 时开路；电容相反", "status": "ready"}
 #
-# ---- 第11章 正弦稳态功率 ----
+# ============================================================
+# 第11章 正弦稳态功率（slide-03）
+# ============================================================
+{"id": "circuit-015", "question": "有功功率、无功功率和视在功率分别是什么？三者之间是什么关系？", "negative": false, "expect_pages": [7, 11], "expect_points": ["有功功率 P = UIcosφ，单位 W", "无功功率 Q = UIsinφ，单位 var", "视在功率 S = UI，单位 VA，反映设备容量", "三者满足 S = √(P² + Q²)"], "chapter": "第11章 正弦稳态功率", "source_doc": "slide-03", "notes": "依据第7页有功功率定义、第11页视在功率与 S=√(P²+Q²)、P 与 Q 的表达式", "status": "ready"}
+{"id": "circuit-016", "question": "提高感性负载的功率因数，为什么一般并联电容而不是串联电容？", "negative": false, "expect_pages": [21, 22], "expect_points": ["功率因数低会使线路电流变大、线损 I²R 增加（I = P/(Ucosφ)）", "功率因数校正的前提是负载端的电压和电流不能改变", "串联电容会改变负载端电压，使负载不能正常工作", "并联电容只提供容性无功，不改变负载本身的工作状态"], "chapter": "第11章 正弦稳态功率", "source_doc": "slide-03", "notes": "依据第21页线损与 I=P/(Ucosφ)、第22页「串电容VS并电容」及「校正前提：负载端电压电流不能改变」", "status": "ready"}
 {"id": "choice-003", "question": "关于无功功率，下列哪一项是正确的？", "negative": false, "choices": ["纯电阻的 Q 不为零，因为电阻上也有电压和电流", "感性负载吸收无功（Q 大于 0）", "容性负载的无功功率为正值", "无功功率就是电路实际消耗的功率"], "expected_choice": "B", "expect_pages": [8, 9], "expect_points": [], "chapter": "第11章 正弦稳态功率", "source_doc": "slide-03", "notes": "依据第9页「X>0 感性（Q>0）→吸收无功」「纯电阻 φ=0，Q=UIsinφ=0」", "status": "ready"}
 #
-# ---- 负样本 ----
-{"id": "neg-001", "question": "回转器怎么用在有源滤波器设计里？", "negative": true, "chapter": "（资料未覆盖）", "notes": "实测通过：检索最高 0.627，模型如实回答「现有资料没有覆盖回转器」，未编造", "status": "ready"}
-{"id": "neg-002", "question": "非线性电阻电路的小信号分析法怎么做？", "negative": true, "chapter": "（资料未覆盖）", "notes": "第17章内容，19 份课件里没有。实测模型会说明未覆盖", "status": "ready"}
-
 # ============================================================
-# 待填槽位区：32 题
-# topic 与页码已按切块元数据预填，你只需：
-#   1. 把 question 改成学生的大白话（去掉【待写】标记）
-#   2. 补上 expect_points（这道题必须答到的几个结论）
-#   3. 把 status 改成 ready
+# 第12章 三相电路（slide-14）
 # ============================================================
+{"id": "circuit-017", "question": "对称三相电源有哪三个特征？", "negative": false, "expect_pages": [7, 8, 11], "expect_points": ["三个电源频率（角频率）相同", "幅值（有效值）相同", "相位互差 120°", "相序分正序与负序两种"], "chapter": "第12章 三相电路", "source_doc": "slide-14", "notes": "依据第8页三相电源定义、第11页「对称三相电源特性」三条及正序/负序", "status": "ready"}
 #
-# ---- 第1章 电路模型与基本定律（slide-04）：问答2 + 选择1 ----
-{"id": "draft-p01", "question": "【待写·问答】集中参数电路分析的假设是什么？", "negative": false, "expect_pages": [11], "expect_points": [], "chapter": "第1章 电路模型与基本定律", "source_doc": "slide-04", "notes": "原文第11页「集中参数电路分析的假设」", "status": "draft"}
-{"id": "draft-p02", "question": "【待写·问答】电流的参考方向与实际方向是什么关系？", "negative": false, "expect_pages": [12, 13], "expect_points": [], "chapter": "第1章 电路模型与基本定律", "source_doc": "slide-04", "notes": "原文第12-13页「电流」「方向」", "status": "draft"}
-{"id": "draft-p03", "question": "【待写·选择】关于理想元件的三大原则，哪项正确？（四个选项都从第7页找）", "negative": false, "choices": ["选项A待写", "选项B待写"], "expected_choice": "A", "expect_pages": [7], "expect_points": [], "chapter": "第1章 电路模型与基本定律", "source_doc": "slide-04", "notes": "原文第7页「理想化的三大原则」；选项写好后把 expected_choice 改成正确项", "status": "draft"}
+# ============================================================
+# 第13章 耦合电感（slide-15）
+# ============================================================
+{"id": "circuit-018", "question": "同名端怎么判断？写耦合电感的电压关系时，同名端起什么作用？", "negative": false, "expect_pages": [8, 9], "expect_points": ["同名端是互感电压极性相同的端子，常用星号标出", "两线圈电流都从同名端流入时，互感起加强作用", "写 u-i 关系时，互感项的符号由电流是否从同名端流入决定"], "chapter": "第13章 耦合电感", "source_doc": "slide-15", "notes": "依据第8页同名端标注与加强型/削弱型耦合、第9页例题中 ±M·di/dt 的符号", "status": "ready"}
 #
-# ---- 第2章 电阻电路等效变换（slide-05）：问答2 + 选择1 ----
-{"id": "draft-p04", "question": "【待写·问答】二端电路等效的概念是什么？等效前后什么变了、什么没变？", "negative": false, "expect_pages": [9, 10, 11], "expect_points": [], "chapter": "第2章 电阻电路等效变换", "source_doc": "slide-05", "notes": "原文第9-11页「二端电路（网络）」「等效的概念」「等效特点」", "status": "draft"}
-{"id": "draft-p05", "question": "【待写·问答】串联电阻的分压公式和并联电阻的分流公式分别是什么？", "negative": false, "expect_pages": [15, 16, 19], "expect_points": [], "chapter": "第2章 电阻电路等效变换", "source_doc": "slide-05", "notes": "原文第15-16页分压、第19页分流", "status": "draft"}
-{"id": "draft-p06", "question": "【待写·选择】关于二端电路等效，哪项说法正确？（考「对外等效、对内不等效」）", "negative": false, "choices": ["选项A待写", "选项B待写"], "expected_choice": "A", "expect_pages": [11], "expect_points": [], "chapter": "第2章 电阻电路等效变换", "source_doc": "slide-05", "notes": "原文第11页「3. 二端电路等效特点」", "status": "draft"}
+# ============================================================
+# 第14章 频率响应（slide-16）
+# ============================================================
+{"id": "circuit-019", "question": "RLC 串联电路发生谐振时有哪些特点？", "negative": false, "expect_pages": [10, 11], "expect_points": ["谐振条件是端口电压与电流同相位", "谐振时阻抗最小，Z = R", "谐振时电流最大，I0 = Us/R", "电感电压与电容电压大小相等、方向相反，互相抵消"], "chapter": "第14章 频率响应", "source_doc": "slide-16", "notes": "依据第10页「谐振条件：端口电压电流同相位」、第11页「谐振时电气特点」", "status": "ready"}
 #
-# ---- 第3章 电路方程（slide-06）：问答1 + 选择1 ----
-{"id": "draft-p07", "question": "【待写·问答】结点电压法遇到无伴电压源时怎么处理？", "negative": false, "expect_pages": [33], "expect_points": [], "chapter": "第3章 电路方程", "source_doc": "slide-06", "notes": "原文第33页「以电压源电流为变量，增补结点电压和电压源间的关系」", "status": "draft"}
-{"id": "draft-p08", "question": "【待写·选择】网孔电流法的适用范围，哪项正确？", "negative": false, "choices": ["选项A待写", "选项B待写"], "expected_choice": "A", "expect_pages": [2, 26], "expect_points": [], "chapter": "第3章 电路方程", "source_doc": "slide-06", "notes": "原文第2页「3.3 网孔分析法」、第26页适用范围", "status": "draft"}
+# ============================================================
+# 第15章 非正弦周期电流（slide-17）
+# ============================================================
+{"id": "circuit-020", "question": "非正弦周期电源作用下的稳态响应怎么求？", "negative": false, "expect_pages": [6, 7], "expect_points": ["先把非正弦周期信号展开成傅里叶级数：直流分量 + 各次谐波", "对直流分量和各次谐波分别用相量法求稳态响应", "再用叠加定理把各分量单独作用的结果相加"], "chapter": "第15章 非正弦周期电流", "source_doc": "slide-17", "notes": "依据第6页「叠加定理：计算各电源单独作用下的稳态响应，再进行相加」、第7页傅里叶级数展开", "status": "ready"}
 #
-# ---- 第4章 电路定理（slide-07/08/09）：问答2 + 选择1 ----
-{"id": "circuit-004", "question": "叠加定理能不能用来叠加功率？为什么？", "negative": false, "expect_pages": [12], "expect_points": ["功率不能叠加", "功率是电压和电流的乘积，是电源的二次函数", "p2 = (i2'+i2'')²R2 不等于 (i2')²R2 + (i2'')²R2"], "chapter": "第4章 电路定理", "source_doc": "slide-07", "notes": "【示范填写】原预填页码 [10,11] 并不含答案，实际在第12页的 (4)；依据原文「功率不能叠加（功率为电压和电流的乘积，为电源的二次函数）」", "status": "ready"}
-{"id": "draft-p10", "question": "【待写·问答】戴维南定理里的等效电压和等效电阻分别怎么求？", "negative": false, "expect_pages": [9, 13], "expect_points": [], "chapter": "第4章 电路定理", "source_doc": "slide-08", "notes": "原文第9页「定理的引出」、第13页戴维南定理证明", "status": "draft"}
-{"id": "draft-p11", "question": "【待写·选择】互易定理的三种形式，哪项适用条件正确？", "negative": false, "choices": ["选项A待写", "选项B待写"], "expected_choice": "A", "expect_pages": [7, 8, 10], "expect_points": [], "chapter": "第4章 电路定理", "source_doc": "slide-09", "notes": "原文第7-10页互易网络三种形式", "status": "draft"}
+# ============================================================
+# 第20章 均匀传输线（slide-18）
+# ============================================================
+{"id": "circuit-021", "question": "集中参数电路和分布参数电路怎么区分？界限是什么？", "negative": false, "expect_pages": [5], "expect_points": ["看器件几何尺寸 d 与工作波长 λ 的关系", "d ≤ 0.01λ 可按集中参数处理，d > 0.01λ 必须用分布参数", "集中参数忽略电磁参数的空间分布性", "分布参数下电压电流既是时间的函数，也是空间坐标的函数"], "chapter": "第20章 均匀传输线", "source_doc": "slide-18", "notes": "依据第5页「集总参数电路」与「分布参数电路」逐条对比；第1章第11页有同样判据", "status": "ready"}
 #
-# ---- 第7章 一阶电路（slide-10）：问答1 ----
-{"id": "draft-p12", "question": "【待写·问答】单位阶跃函数在电路分析里怎么用？", "negative": false, "expect_pages": [5, 6, 7], "expect_points": [], "chapter": "第7章 一阶电路", "source_doc": "slide-10", "notes": "原文第5-7页「1. 单位阶跃函数」及其应用", "status": "draft"}
+# ============================================================
+# 第21章 传输线暂态（slide-19）
+# ============================================================
+{"id": "circuit-022", "question": "无损耗传输线的终端反射波有哪两种确定方法？", "negative": false, "expect_pages": [21, 23], "expect_points": ["方法一：彼德生法则", "方法二：反射系数法"], "chapter": "第21章 传输线暂态", "source_doc": "slide-19", "notes": "依据第21页「确定终端反射波方法一：彼德生法则」、第23页「方法二：反射系数」。答案偏薄，建议再补一条反射系数的定义", "status": "ready"}
 #
-# ---- 第8章 一阶电路（slide-11）：问答1 + 选择1 ----
-{"id": "draft-p13", "question": "【待写·问答】RC 电路的时间常数有什么物理意义？它决定什么？", "negative": false, "expect_pages": [5, 7, 8], "expect_points": [], "chapter": "第8章 一阶电路", "source_doc": "slide-11", "notes": "原文第5-8页「RC电路的零输入响应」「时间常数」", "status": "draft"}
-{"id": "draft-p14", "question": "【待写·选择】零输入响应、零状态响应、全响应的区别，哪项正确？", "negative": false, "choices": ["选项A待写", "选项B待写"], "expected_choice": "A", "expect_pages": [4], "expect_points": [], "chapter": "第8章 一阶电路", "source_doc": "slide-11", "notes": "原文第4页三种响应的定义", "status": "draft"}
-#
-# ---- 第10章 正弦稳态（slide-01/02）：问答2 ----
-{"id": "draft-p15", "question": "【待写·问答】两个正弦量的相位差怎么算？相位差和初相位是一回事吗？", "negative": false, "expect_pages": [8, 9, 10], "expect_points": [], "chapter": "第10章 正弦稳态", "source_doc": "slide-01", "notes": "原文第8-10页「初相位」「相位差」「特殊相位关系」", "status": "draft"}
-{"id": "draft-p16", "question": "【待写·问答】位形相量图和普通相量图有什么不同？", "negative": false, "expect_pages": [4, 5], "expect_points": [], "chapter": "第10章 正弦稳态", "source_doc": "slide-02", "notes": "原文第4-5页「10.5 位形相量图」「位形图」", "status": "draft"}
-#
-# ---- 第11章 正弦稳态功率（slide-03）：问答2 ----
-{"id": "draft-p17", "question": "【待写·问答】有功功率、无功功率、视在功率三者有什么区别和联系？", "negative": false, "expect_pages": [7, 11, 12], "expect_points": [], "chapter": "第11章 正弦稳态功率", "source_doc": "slide-03", "notes": "原文第7页有功、第11页视在、第12页功率因数", "status": "draft"}
-{"id": "draft-p18", "question": "【待写·问答】提高功率因数为什么一般并联电容，而不是串联电容？", "negative": false, "expect_pages": [], "expect_points": [], "chapter": "第11章 正弦稳态功率", "source_doc": "slide-03", "notes": "这是学生最常问的之一；页码待你按原文确认", "status": "draft"}
-#
-# ---- 第12章 三相电路（slide-14）：问答1 ----
-{"id": "draft-p19", "question": "【待写·问答】星形和三角形联接时，线电压与相电压、线电流与相电流各是什么关系？", "negative": false, "expect_pages": [7, 8, 11], "expect_points": [], "chapter": "第12章 三相电路", "source_doc": "slide-14", "notes": "原文第7-8页三相电源、第11页对称三相电源特性", "status": "draft"}
-#
-# ---- 第13章 耦合电感（slide-15）：问答1 ----
-{"id": "draft-p20", "question": "【待写·问答】同名端怎么判断？判断错了会怎样？", "negative": false, "expect_pages": [8, 9], "expect_points": [], "chapter": "第13章 耦合电感", "source_doc": "slide-15", "notes": "原文第8页「4. 同名端」、第9页例题", "status": "draft"}
-#
-# ---- 第14章 频率响应（slide-16）：问答1 ----
-{"id": "draft-p21", "question": "【待写·问答】电路发生谐振时有哪些特点？", "negative": false, "expect_pages": [9, 10, 11], "expect_points": [], "chapter": "第14章 频率响应", "source_doc": "slide-16", "notes": "原文第9-11页「谐振条件」「谐振频率」「谐振时电气特点」", "status": "draft"}
-#
-# ---- 第15章 非正弦周期电流（slide-17）：问答1 ----
-{"id": "draft-p22", "question": "【待写·问答】非正弦周期电流的有效值怎么由各次谐波算出来？", "negative": false, "expect_pages": [6, 7, 8], "expect_points": [], "chapter": "第15章 非正弦周期电流", "source_doc": "slide-17", "notes": "原文第6-8页「傅里叶级数」「直流分量」「k次谐波分量」", "status": "draft"}
-#
-# ---- 第20章 均匀传输线（slide-18）：问答1 ----
-{"id": "draft-p23", "question": "【待写·问答】分布参数电路和集中参数电路的区别是什么？什么时候必须用分布参数？", "negative": false, "expect_pages": [5, 6], "expect_points": [], "chapter": "第20章 均匀传输线", "source_doc": "slide-18", "notes": "原文第5-6页「集总参数电路」「分布参数电路」「均匀传输线」", "status": "draft"}
-#
-# ---- 第21章 传输线暂态（slide-19）：问答1 ----
-{"id": "draft-p24", "question": "【待写·问答】传输线上的波过程怎么分析？反射系数怎么用？", "negative": false, "expect_pages": [], "expect_points": [], "chapter": "第21章 传输线暂态", "source_doc": "slide-19", "notes": "页码待确认（这份资料的章节结构没有自动提取出来）", "status": "draft"}
-#
-# ---- 负样本（8 道）：都在课程范围内，但 19 份课件没讲或没讲透 ----
-{"id": "draft-n01", "question": "【待确认·负样本】二端口网络的 Z 参数怎么测量？", "negative": true, "chapter": "（资料未覆盖）", "notes": "第16章内容，课件里没有。跑 --only-retrieval 确认相关度确实低", "status": "draft"}
-{"id": "draft-n02", "question": "【待确认·负样本】磁路的基本定律和电路有哪些对应关系？", "negative": true, "chapter": "（资料未覆盖）", "notes": "磁路部分课件没有", "status": "draft"}
-{"id": "draft-n03", "question": "【待确认·负样本】拉普拉斯变换在电路分析里具体怎么用？", "negative": true, "chapter": "（资料未覆盖）", "notes": "第17章复频域分析法，课件只在目录里提了一句，没有正文", "status": "draft"}
-{"id": "draft-n04", "question": "【待确认·负样本】状态变量法怎么用来分析高阶动态电路？", "negative": true, "chapter": "（资料未覆盖）", "notes": "课件没有状态变量法", "status": "draft"}
-{"id": "draft-n05", "question": "【待确认·负样本】非线性电路的图解法怎么做？", "negative": true, "chapter": "（资料未覆盖）", "notes": "课件只讲了非线性电阻的定义，没讲图解法", "status": "draft"}
-{"id": "draft-n06", "question": "【待确认·负样本】有源滤波器的完整设计步骤是什么？", "negative": true, "chapter": "（资料未覆盖）", "notes": "课件给了几种滤波器的传递函数，但没讲怎么从指标反推元件参数——属于「讲到了但没讲透」，更接近真实场景", "status": "draft"}
-{"id": "draft-n07", "question": "【待确认·负样本】怎么判断一个电路是否稳定？", "negative": true, "chapter": "（资料未覆盖）", "notes": "稳定性判据课件没有", "status": "draft"}
-{"id": "draft-n08", "question": "【待确认·负样本】运放的虚短虚断在使用时有什么条件限制？", "negative": true, "chapter": "（资料未覆盖）", "notes": "课件只在有源滤波器里用到运放，没讲虚短虚断的成立条件", "status": "draft"}
+# ============================================================
+# 负样本（10 道）：都在课程范围内，但 19 份课件没讲或没讲透
+# 建议先跑 `python -m pipeline golden --only neg-0xx --only-retrieval` 复核相关度
+# ============================================================
+{"id": "neg-001", "question": "回转器怎么用在有源滤波器设计里？", "negative": true, "chapter": "（资料未覆盖）", "notes": "实测：检索最高 0.627，模型如实回答「现有资料没有覆盖回转器」", "status": "ready"}
+{"id": "neg-002", "question": "非线性电阻电路的小信号分析法怎么做？", "negative": true, "chapter": "（资料未覆盖）", "notes": "实测：模型会说明未覆盖。课件只讲了非线性电阻的定义", "status": "ready"}
+{"id": "neg-003", "question": "二端口网络的 Z 参数怎么测量？", "negative": true, "chapter": "（资料未覆盖）", "notes": "第16章内容，19 份课件里没有二端口网络", "status": "ready"}
+{"id": "neg-004", "question": "磁路的基本定律和电路有哪些对应关系？", "negative": true, "chapter": "（资料未覆盖）", "notes": "磁路部分课件没有", "status": "ready"}
+{"id": "neg-005", "question": "拉普拉斯变换在电路分析里具体怎么用？", "negative": true, "chapter": "（资料未覆盖）", "notes": "第17章复频域分析法，课件只在目录里提了一句，没有正文", "status": "ready"}
+{"id": "neg-006", "question": "状态变量法怎么用来分析高阶动态电路？", "negative": true, "chapter": "（资料未覆盖）", "notes": "课件没有状态变量法", "status": "ready"}
+{"id": "neg-007", "question": "非线性电路的图解法怎么做？", "negative": true, "chapter": "（资料未覆盖）", "notes": "课件只讲了非线性电阻的定义，没讲图解法", "status": "ready"}
+{"id": "neg-008", "question": "有源滤波器的完整设计步骤是什么？", "negative": true, "chapter": "（资料未覆盖）", "notes": "「讲到了但没讲透」类：课件给了几种滤波器的传递函数，但没讲怎么由指标反推元件参数", "status": "ready"}
+{"id": "neg-009", "question": "怎么判断一个电路是否稳定？", "negative": true, "chapter": "（资料未覆盖）", "notes": "稳定性判据课件没有", "status": "ready"}
+{"id": "neg-010", "question": "运放的虚短虚断在使用时有什么条件限制？", "negative": true, "chapter": "（资料未覆盖）", "notes": "「讲到了但没讲透」类：课件只在有源滤波器里用到运放，没讲虚短虚断的成立条件", "status": "ready"}

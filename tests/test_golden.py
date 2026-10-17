@@ -22,6 +22,7 @@ from pipeline.golden import (
     compose_question,
     describe_hits,
     extract_choice,
+    foreign_docs,
     load_cases,
     pages_from_hits,
     plan_status,
@@ -132,6 +133,28 @@ class TestPagesFromHits(unittest.TestCase):
     def test_expands_page_range(self) -> None:
         hits = [Hit("k", 25, 26, "", "", "", 1, 0.9)]
         self.assertEqual(pages_from_hits(hits), [25, 26])
+
+    def test_filters_by_document(self) -> None:
+        """不同资料各有自己的第 25 页，必须按资料过滤。
+
+        实测 bug：期望 slide-08 第 9、13 页，实际命中的却是别的资料第 52、53 页，
+        而只比页码数字的判分把它当成了命中。
+        """
+        hits = [
+            Hit("slide-08#0003", 9, 10, "", "", "", 1, 0.9),
+            Hit("slide-10#0007", 52, 53, "", "", "", 1, 0.8),
+        ]
+        self.assertEqual(pages_from_hits(hits, doc_key="slide-08"), [9, 10])
+        self.assertEqual(pages_from_hits(hits, doc_key="slide-10"), [52, 53])
+
+    def test_foreign_docs_reports_offtarget_retrieval(self) -> None:
+        hits = [
+            Hit("slide-08#0003", 9, None, "", "", "", 1, 0.9),
+            Hit("slide-10#0007", 52, None, "", "", "", 1, 0.8),
+            Hit("slide-10#0008", 53, None, "", "", "", 1, 0.7),
+        ]
+        self.assertEqual(foreign_docs(hits, "slide-08"), ["slide-10×2"])
+        self.assertEqual(foreign_docs(hits, "slide-10"), ["slide-08×1"])
 
     def test_dedupes_and_sorts(self) -> None:
         hits = [

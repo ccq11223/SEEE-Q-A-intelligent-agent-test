@@ -557,20 +557,44 @@ def _format_top_hits(item: CaseResult) -> str:
     return "、".join(f"{label}({score:.3f})" for label, score in item.top_hits)
 
 
-def pages_from_hits(hits: Sequence[Any]) -> list[int]:
+def pages_from_hits(hits: Sequence[Any], *, doc_key: str | None = None) -> list[int]:
     """把命中的内容块展开成页码集合。
 
     跨页块（page_no..page_end）要把中间每一页都算进去，
     否则「期望命中第 26 页、块是 25-26 页」会被误判成没命中。
+
+    ``doc_key`` 非空时**只统计这份资料命中的块**。这一点非常重要：
+    知识库是整个课程混在一起的，19 份资料各有自己的第 25 页。
+    如果不区分资料，一道题会「命中」另一份资料的同号页——实测出过
+    期望 slide-08 第 9、13 页、实际命中别的资料第 52、53 页却被判为命中的情况。
     """
     pages: set[int] = set()
     for hit in hits:
+        if doc_key:
+            chunk_key = str(getattr(hit, "chunk_key", "") or "")
+            if not chunk_key.startswith(f"{doc_key}#"):
+                continue
         start = getattr(hit, "page_no", None)
         if start is None:
             continue
         end = getattr(hit, "page_end", None) or start
         pages.update(range(int(start), int(end) + 1))
     return sorted(pages)
+
+
+def foreign_docs(hits: Sequence[Any], doc_key: str) -> list[str]:
+    """命中的内容块里，有多少来自别的资料。
+
+    这个数字能说明「检索是不是跑偏到别的章节去了」，比单纯的命中率更能
+    反映排序质量。
+    """
+    others: dict[str, int] = {}
+    for hit in hits:
+        chunk_key = str(getattr(hit, "chunk_key", "") or "")
+        name = chunk_key.split("#", 1)[0] if "#" in chunk_key else "（未知）"
+        if name and name != doc_key:
+            others[name] = others.get(name, 0) + 1
+    return [f"{name}×{count}" for name, count in sorted(others.items(), key=lambda kv: -kv[1])]
 
 
 @dataclass
@@ -663,22 +687,40 @@ def run_case(
                 settings, store, embed_client, asked
             )
             result.top_score = found.top_score
-            result.hit_pages = pages_from_hits(found.hits)
-            result.front_pages = pages_from_hits(found.hits[:front_n])
+            result.hit_pages = pages_from_hits(found.hits, doc_key=case.source_doc)
+            result.front_pages = pages_from_hits(
+                found.hits[:front_n], doc_key=case.source_doc
+            )
+            if case.source_doc:
+                others = foreign_docs(found.hits, case.source_doc)
+                if others:
+                    result.note = f"跨资料命中：{'、'.join(others)}"
             result.top_hits = describe_hits(found.hits)
         else:
             answer: Answer = answer_question(
                 settings, store, embed_client, generate_client, asked
             )
             result.top_score = answer.top_score
-            result.hit_pages = pages_from_hits(answer.hits)
-            result.front_pages = pages_from_hits(answer.hits[:front_n])
+            result.hit_pages = pages_from_hits(answer.hits, doc_key=case.source_doc)
+            result.front_pages = pages_from_hits(
+                answer.hits[:front_n], doc_key=case.source_doc
+            )
             result.top_hits = describe_hits(answer.hits)
             result.mode = answer.mode
             result.citations = list(answer.citations)
             result.citation_valid = answer.citation_valid
             result.answer = answer.text
-            result.note = answer.note
+            if case.source_doc:
+                others = foreign_docs(answer.hits, case.source_doc)
+                if others:
+                    result.note = (
+                        f"跨资料命中：{'、'.join(others)}"
+                        + (f"；{answer.note}" if answer.note else "")
+                    )
+                else:
+                    result.note = answer.note
+            else:
+                result.note = answer.note
             if case.is_choice and not case.negative:
                 result.chosen = extract_choice(answer.text)
                 if result.chosen:
