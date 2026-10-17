@@ -97,13 +97,13 @@
 # 负样本（10 道）：都在课程范围内，但 19 份课件没讲或没讲透
 # 建议先跑 `python -m pipeline golden --only neg-0xx --only-retrieval` 复核相关度
 # ============================================================
-{"id": "neg-001", "question": "测量二端口网络的 Y 参数时，输出端口应当怎么处理？", "negative": true, "choices": ["短路", "开路", "接匹配负载", "接任意负载"], "expected_choice": "A", "expect_pages": [], "expect_points": [], "chapter": "（资料未覆盖）", "source_doc": "", "notes": "二端口网络课件完全没讲（第16章），Y 参数怎么测也一定没有", "status": "ready"}
+{"id": "neg-001", "question": "根据采样定理，为了避免频谱混叠，采样频率至少应是信号最高频率的多少倍？", "negative": true, "choices": ["1 倍", "2 倍", "4 倍", "10 倍"], "expected_choice": "B", "expect_pages": [], "expect_points": [], "chapter": "（资料未覆盖）", "source_doc": "", "notes": "实测重排 0.001 判定无依据；采样定理属信号与系统，19 份课件都没有", "status": "ready"}
 {"id": "neg-002", "question": "非线性电阻电路的小信号分析法怎么做？", "negative": true, "chapter": "（资料未覆盖）", "notes": "实测：模型会说明未覆盖。课件只讲了非线性电阻的定义", "status": "ready"}
-{"id": "neg-003", "question": "二端口网络的 Z 参数怎么测量？", "negative": true, "chapter": "（资料未覆盖）", "notes": "第16章内容，19 份课件里没有二端口网络", "status": "ready"}
+{"id": "neg-003", "question": "异步电动机的转差率 s 是怎么定义的？", "negative": true, "choices": ["s =（同步转速 - 转子转速）/ 同步转速", "s = 转子转速 / 同步转速", "s = 同步转速 / 转子转速", "s =（转子转速 - 同步转速）/ 转子转速"], "expected_choice": "A", "expect_pages": [], "expect_points": [], "chapter": "（资料未覆盖）", "source_doc": "", "notes": "实测重排 0.020 判定无依据；电机学内容，课件没有", "status": "ready"}
 {"id": "neg-004", "question": "磁路的基本定律和电路有哪些对应关系？", "negative": true, "chapter": "（资料未覆盖）", "notes": "磁路部分课件没有", "status": "ready"}
 {"id": "neg-005", "question": "拉普拉斯变换在电路分析里具体怎么用？", "negative": true, "chapter": "（资料未覆盖）", "notes": "第17章复频域分析法，课件只在目录里提了一句，没有正文", "status": "ready"}
-{"id": "neg-006", "question": "状态变量法怎么用来分析高阶动态电路？", "negative": true, "chapter": "（资料未覆盖）", "notes": "课件没有状态变量法", "status": "ready"}
-{"id": "neg-007", "question": "非线性电路的图解法怎么做？", "negative": true, "chapter": "（资料未覆盖）", "notes": "课件只讲了非线性电阻的定义，没讲图解法", "status": "ready"}
-{"id": "neg-008", "question": "有源滤波器的完整设计步骤是什么？", "negative": true, "chapter": "（资料未覆盖）", "notes": "「讲到了但没讲透」类：课件给了几种滤波器的传递函数，但没讲怎么由指标反推元件参数", "status": "ready"}
-{"id": "neg-009", "question": "怎么判断一个电路是否稳定？", "negative": true, "chapter": "（资料未覆盖）", "notes": "稳定性判据课件没有", "status": "ready"}
-{"id": "neg-010", "question": "运放的虚短虚断在使用时有什么条件限制？", "negative": true, "chapter": "（资料未覆盖）", "notes": "「讲到了但没讲透」类：课件只在有源滤波器里用到运放，没讲虚短虚断的成立条件", "status": "ready"}
+{"id": "neg-006", "question": "麦克斯韦方程组的四个方程分别描述什么？", "negative": true, "choices": ["高斯定律、法拉第电磁感应定律、安培环路定律、磁通连续性", "欧姆定律、基尔霍夫电流定律、基尔霍夫电压定律、焦耳定律", "节点方程、回路方程、网孔方程、割集方程", "电阻的伏安特性、电感的伏安特性、电容的伏安特性、电源的外特性"], "expected_choice": "A", "expect_pages": [], "expect_points": [], "chapter": "（资料未覆盖）", "source_doc": "", "notes": "实测重排 0.020 判定无依据；电磁场内容，课件没有", "status": "ready"}
+{"id": "neg-007", "question": "运算放大器的压摆率（slew rate）指的是什么？", "negative": true, "choices": ["输出电压的最大变化速率，单位 V/μs", "输入偏置电流随温度的变化率", "开环增益随频率下降的速率", "电源电压波动对输出的影响程度"], "expected_choice": "A", "expect_pages": [], "expect_points": [], "chapter": "（资料未覆盖）", "source_doc": "", "notes": "实测重排 0.076 判定无依据；课件只在有源滤波器里画过运放符号，没讲压摆率", "status": "ready"}
+{"id": "neg-008", "question": "设计有源低通滤波器时，滤波器的阶数主要由什么决定？", "negative": true, "choices": ["过渡带的陡峭程度要求", "运放的供电电压", "负载电阻的大小", "输入信号的幅值"], "expected_choice": "A", "expect_pages": [], "expect_points": [], "chapter": "（资料未覆盖）", "source_doc": "", "notes": "实测重排 0.390 判定无依据；课件给了几种滤波器的传递函数，没讲设计时怎么定阶数", "status": "ready"}
+{"id": "neg-009", "question": "用劳斯判据判断电路稳定性时，特征方程的系数需要满足什么前提？", "negative": true, "choices": ["所有系数同号且不缺项", "系数必须全为正整数", "最高次项系数必须等于 1", "常数项必须为 0"], "expected_choice": "A", "expect_pages": [], "expect_points": [], "chapter": "（资料未覆盖）", "source_doc": "", "notes": "实测重排 0.044 判定无依据；稳定性判据课件完全没有", "status": "ready"}
+{"id": "neg-010", "question": "用二端口网络设计固定衰减器时，若要求两端都匹配，通常需要满足什么条件？", "negative": true, "choices": ["两端的特性阻抗相等", "一端开路、一端短路", "两端都短路", "两端阻抗都等于零"], "expected_choice": "A", "expect_pages": [], "expect_points": [], "chapter": "（资料未覆盖）", "source_doc": "", "notes": "实测重排 0.340 判定无依据；串讲有二端口章节，但没有衰减器设计内容", "status": "ready"}

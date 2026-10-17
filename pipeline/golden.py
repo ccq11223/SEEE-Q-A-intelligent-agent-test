@@ -250,7 +250,8 @@ def summarize_cases(cases: Sequence[GoldenCase]) -> str:
     return (
         f"共 {len(cases)} 题：待计分 {len(ready)} 题"
         f"（正样本 {len(positive)}、负样本 {len(negative)}）"
-        f"（其中选择题 {len(choice)} 道）"
+        f"（选择题共 {len(choice)} 道，其中正样本 "
+        f"{sum(1 for case in choice if not case.negative)} 道）"
         f"，草稿 {len(drafts)} 题"
     )
 
@@ -862,6 +863,7 @@ def render_report(
             lines.append(f"### {item.case.id}：{item.case.question}")
             lines.append("")
             lines.append(f"- 要点覆盖率 {item.point_rate:.0%}，引用页码 {item.citations}")
+            lines.append(f"- 回答开头：{item.answer[:300] or '（无回答）'}")
             for point in item.points_missed:
                 lines.append(f"  - ❌ 没答到：{point}")
             for point in item.points_hit:
