@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1f4e79">
 <title>课程答疑</title>
-<link rel="stylesheet" href="/static/katex/katex.min.css">
+<link rel="stylesheet" href="/static/katex/katex.min.css?v=20261017b">
 <style>
   :root {
     --ink: #1c2430;
@@ -145,7 +145,8 @@
   .bot .bubble th, .bot .bubble td { border: 1px solid var(--line); padding: 5px 8px; font-size: 13px; }
   .katex-display { overflow-x: auto; overflow-y: hidden; }
   .figs { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
-  .fig { margin: 0; }
+  .fig { margin: 10px 0; }
+  .fig:last-child { margin-bottom: 2px; }
   .fig img {
     max-width: 100%; border: 1px solid var(--line);
     border-left: 3px solid #9a7fd1; border-radius: 8px; background: #fff;
@@ -180,10 +181,10 @@
   </footer>
 </div>
 
-<script src="/static/katex/katex.min.js"></script>
-<script src="/static/marked.min.js"></script>
-<script src="/static/purify.min.js"></script>
-<script src="/static/render.js"></script>
+<script src="/static/katex/katex.min.js?v=20261017b"></script>
+<script src="/static/marked.min.js?v=20261017b"></script>
+<script src="/static/purify.min.js?v=20261017b"></script>
+<script src="/static/render.js?v=20261017b"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const chat = $('chat');
@@ -222,23 +223,8 @@ function addMessage(text, who, meta) {
     bubble.textContent = text;
   }
   box.appendChild(bubble);
-  if (meta && meta.images && meta.images.length) {
-    const figs = document.createElement('div');
-    figs.className = 'figs';
-    meta.images.forEach((image) => {
-      const fig = document.createElement('figure');
-      fig.className = 'fig';
-      const pic = document.createElement('img');
-      pic.src = image.url;
-      pic.alt = image.label || '';
-      pic.loading = 'lazy';
-      const cap = document.createElement('figcaption');
-      cap.textContent = image.label || '';
-      fig.appendChild(pic);
-      fig.appendChild(cap);
-      figs.appendChild(fig);
-    });
-    box.appendChild(figs);
+  if (who === 'bot' && meta && meta.images && meta.images.length) {
+    window.insertPageImages(bubble, meta.images);
   }
   if (meta) {
     const m = document.createElement('div');
