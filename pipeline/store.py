@@ -113,6 +113,8 @@ class Hit:
     score: float
     document_id: int | None = None
     chunk_id: int | None = None
+    #: 向量召回时的分数。重排之后 score 会被替换成重排分，原始分数留在这里备查。
+    vector_score: float = 0.0
 
     @property
     def page_label(self) -> str:

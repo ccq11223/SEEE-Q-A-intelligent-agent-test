@@ -264,6 +264,42 @@ class OpenAICompatClient:
         items = sorted(items, key=lambda item: item.get("index", 0))
         return [list(item["embedding"]) for item in items]
 
+    def rerank(
+        self, *, query: str, documents: Sequence[str], top_n: int | None = None
+    ) -> list[tuple[int, float]]:
+        """给「问题—段落」两两打分，返回 (原始下标, 相关度分)。
+
+        交叉编码器把问题和段落拼在一起过一遍模型，直接判断「这段话能不能回答这个问题」。
+        这和向量余弦是两回事：向量只衡量语义接近，实测会出现「话题相邻但没答案」
+        被判成有依据的情况（例如问二端口网络的 Z 参数，召回了一堆电容的内容）。
+        """
+        if not documents:
+            return []
+        payload: dict[str, Any] = {
+            "model": self.config.name,
+            "query": query,
+            "documents": list(documents),
+            "return_documents": False,
+        }
+        if top_n:
+            payload["top_n"] = min(top_n, len(documents))
+
+        data = self._post("/rerank", payload)
+        results = data.get("results") or []
+        scored: list[tuple[int, float]] = []
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            try:
+                index = int(item.get("index", 0))
+                score = float(item.get("relevance_score", 0.0))
+            except (TypeError, ValueError):
+                continue
+            scored.append((index, score))
+        if not scored:
+            raise LLMError(f"重排返回里没有 results：{str(data)[:300]}")
+        return scored
+
     # ---------- 解析响应 ----------
     @staticmethod
     def _extract_text(data: dict[str, Any]) -> str:

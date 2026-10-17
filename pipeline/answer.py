@@ -57,6 +57,7 @@ def answer_question(
     *,
     course_id: str | None = None,
     log: bool = True,
+    rerank_client: OpenAICompatClient | None = None,
 ) -> Answer:
     started = time.perf_counter()
     course = course_id or settings.default_course_id
@@ -97,7 +98,12 @@ def answer_question(
     # ---- ① 检索 + ② 依据判定 ----
     try:
         result: RetrievalResult = retrieve(
-            settings, store, embed_client, question, course_id=course
+            settings,
+            store,
+            embed_client,
+            question,
+            course_id=course,
+            rerank_client=rerank_client,
         )
     except LLMError as exc:
         return finish(

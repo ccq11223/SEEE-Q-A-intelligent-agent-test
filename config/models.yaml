@@ -33,3 +33,12 @@ generate:
   # 实测 0.2 时同一道题会出现「有时带页码引用、有时一个页码都不写」。
   temperature: 0.0
   timeout_s: 120
+
+# 重排模型（交叉编码器）。它直接判断「这段资料能不能回答这个问题」，
+# 比向量余弦准得多：向量只衡量「意思像不像」，实测会出现「话题相邻但没答案」
+# 却被判为有依据的情况（二端口网络 Z 参数那道题就是）。
+rerank:
+  name: BAAI/bge-reranker-v2-m3
+  base_url: https://api.siliconflow.cn/v1
+  api_key_env: SILICONFLOW_API_KEY
+  timeout_s: 60

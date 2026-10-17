@@ -230,6 +230,15 @@ def embed_client(settings: Settings) -> OpenAICompatClient:
     )
 
 
+def rerank_client(settings: Settings) -> OpenAICompatClient | None:
+    """重排客户端。config/models.yaml 里没有 rerank 段就返回 None（退回纯向量）。"""
+    try:
+        cfg = settings.model_config("rerank")
+    except ConfigError:
+        return None
+    return OpenAICompatClient(ModelConfig.from_dict("rerank", cfg))
+
+
 # ---------------------------------------------------------------------------
 # 各子命令
 # ---------------------------------------------------------------------------
@@ -677,8 +686,11 @@ def cmd_golden(settings: Settings, args: argparse.Namespace) -> int:
         return 0
 
     store = open_store(settings)
+    reranker = None
     try:
         embed = embed_client(settings)
+        if not getattr(args, "no_rerank", False):
+            reranker = rerank_client(settings)
         try:
             generator = OpenAICompatClient(
                 ModelConfig.from_dict("generate", settings.model_config("generate"))
@@ -686,6 +698,8 @@ def cmd_golden(settings: Settings, args: argparse.Namespace) -> int:
         except (ConfigError, LLMError) as exc:
             fail(str(exc))
             embed.close()
+            if reranker is not None:
+                reranker.close()
             store.close()
             return 1
     except (ConfigError, LLMError) as exc:
@@ -742,12 +756,15 @@ def cmd_golden(settings: Settings, args: argparse.Namespace) -> int:
             retrieval_only=args.only_retrieval,
             progress=show,
             include_ids=set(args.only or []),
+            rerank_client=reranker,
         )
     except LLMError as exc:
         fail(str(exc))
         return 1
     finally:
         embed.close()
+        if reranker is not None:
+            reranker.close()
         generator.close()
         store.close()
 
@@ -1060,6 +1077,7 @@ def cmd_sample(settings: Settings, args: argparse.Namespace) -> int:
 def cmd_search(settings: Settings, args: argparse.Namespace) -> int:
     store = open_store(settings)
     client = embed_client(settings)
+    reranker = None if getattr(args, "no_rerank", False) else rerank_client(settings)
     try:
         result = retrieve(
             settings,
@@ -1068,6 +1086,8 @@ def cmd_search(settings: Settings, args: argparse.Namespace) -> int:
             args.query,
             course_id=getattr(args, "course", None),
             top_k=args.top_k,
+            rerank=reranker is not None,
+            rerank_client=reranker,
         )
     except LLMError as exc:
         fail(str(exc))
@@ -1080,20 +1100,33 @@ def cmd_search(settings: Settings, args: argparse.Namespace) -> int:
          + (f"（{result.reason}）" if result.reason else ""))
     for rank, hit in enumerate(result.hits[: args.top_k or 5], start=1):
         preview = hit.content.replace("\n", " ")[:90]
-        info(f"  {rank}. [{hit.score:.3f}] {hit.page_label}｜{hit.section_title}｜{preview}")
+        extra = f"（向量 {hit.vector_score:.3f}）" if hit.vector_score else ""
+        info(
+            f"  {rank}. [{hit.score:.3f}]{extra} {hit.page_label}"
+            f"｜{hit.section_title}｜{preview}"
+        )
     store.close()
+    if reranker is not None:
+        reranker.close()
     return 0
 
 
 def cmd_ask(settings: Settings, args: argparse.Namespace) -> int:
     store = open_store(settings)
+    reranker = None
+    embed = None
+    generator = None
     try:
         embed = embed_client(settings)
+        reranker = None if getattr(args, "no_rerank", False) else rerank_client(settings)
         generator = OpenAICompatClient(
             ModelConfig.from_dict("generate", settings.model_config("generate"))
         )
     except (ConfigError, LLMError) as exc:
         fail(str(exc))
+        for client in (embed, reranker, generator):
+            if client is not None:
+                client.close()
         store.close()
         return 1
 
@@ -1105,15 +1138,16 @@ def cmd_ask(settings: Settings, args: argparse.Namespace) -> int:
             generator,
             args.query,
             course_id=getattr(args, "course", None),
+            rerank_client=reranker,
         )
     except LLMError as exc:
         fail(str(exc))
-        generator.close()
-        embed.close()
-        store.close()
         return 1
     finally:
-        embed.close()
+        for client in (embed, reranker, generator):
+            if client is not None:
+                client.close()
+        store.close()
 
     info(f"\n模式：{answer.mode}｜最高相关度 {answer.top_score:.3f}｜"
          f"引用页码 {answer.citations or '（无）'}")
@@ -1124,8 +1158,6 @@ def cmd_ask(settings: Settings, args: argparse.Namespace) -> int:
     for rank, hit in enumerate(answer.hits[:5], start=1):
         info(f"  {rank}. {hit.page_label}｜{hit.section_title}｜{hit.score:.3f}")
 
-    generator.close()
-    store.close()
     return 0
 
 
@@ -1237,6 +1269,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="只测检索命中率（只调用向量模型，最便宜）",
     )
     p.add_argument("--only", action="append", help="只跑指定 id，可重复")
+    p.add_argument("--no-rerank", action="store_true", help="关闭重排，对比纯向量的效果")
     p.add_argument("--limit", type=int, help="只跑前 N 题")
     p.add_argument("--report", help="报告输出路径，默认 tests/golden/report.md")
     p.add_argument("--min-hit-rate", type=float, default=0.8, help="检索命中率下限，默认 0.8")
@@ -1266,10 +1299,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("query", help="要检索的问题")
     p.add_argument("--top-k", type=int, default=5)
     p.add_argument("--course")
+    p.add_argument("--no-rerank", action="store_true", help="关闭重排，只看纯向量召回")
 
     p = sub.add_parser("ask", help="答疑自检：走完整决策链并校验引用")
     p.add_argument("query", help="学生的问题")
     p.add_argument("--course")
+    p.add_argument("--no-rerank", action="store_true", help="关闭重排，对比纯向量的效果")
 
     p = sub.add_parser("stats", help="知识库统计")
     p.add_argument("--course")

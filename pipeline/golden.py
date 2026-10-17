@@ -676,6 +676,7 @@ def run_case(
     generate_client: OpenAICompatClient,
     *,
     retrieval_only: bool,
+    rerank_client: OpenAICompatClient | None = None,
 ) -> CaseResult:
     started = time.perf_counter()
     result = CaseResult(case=case)
@@ -684,7 +685,7 @@ def run_case(
     try:
         if retrieval_only:
             found: RetrievalResult = retrieve(
-                settings, store, embed_client, asked
+                settings, store, embed_client, asked, rerank_client=rerank_client
             )
             result.top_score = found.top_score
             result.hit_pages = pages_from_hits(found.hits, doc_key=case.source_doc)
@@ -698,7 +699,12 @@ def run_case(
             result.top_hits = describe_hits(found.hits)
         else:
             answer: Answer = answer_question(
-                settings, store, embed_client, generate_client, asked
+                settings,
+                store,
+                embed_client,
+                generate_client,
+                asked,
+                rerank_client=rerank_client,
             )
             result.top_score = answer.top_score
             result.hit_pages = pages_from_hits(answer.hits, doc_key=case.source_doc)
@@ -749,6 +755,7 @@ def run_golden(
     progress: Callable[[CaseResult, int, int], None] | None = None,
     limit: int | None = None,
     include_ids: set[str] | None = None,
+    rerank_client: OpenAICompatClient | None = None,
 ) -> GoldenReport:
     """跑题集。
 
@@ -770,6 +777,7 @@ def run_golden(
             embed_client,
             generate_client,
             retrieval_only=retrieval_only,
+            rerank_client=rerank_client,
         )
         report.results.append(result)
         if progress:
