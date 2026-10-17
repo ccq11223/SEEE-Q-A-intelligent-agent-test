@@ -1,21 +1,38 @@
-"""答疑决策链（方案 §4.2）的建库自检版。
+"""答疑决策链：课件优先，其次联网，最后通用知识。
 
-和将来在线服务用的是同一套逻辑，目的是让「阶段 0 验收」可以现在就做：
-从提问一路走到「回答 + 正确页码引用」，并且资料没覆盖时老老实实转人工。
+产品取向（2026-10 调整）
+------------------------
+学生问的问题如果课件没覆盖，**不能直接拒答**。按依据强弱分三档作答，
+每一档都在回答开头明确标出依据来源：
+
+* ``kb``      课件里有可用依据，回答带页码引用；
+* ``web``     课件没有，但联网搜索到了，回答带来源链接；
+* ``general`` 课件和网络都没有，用模型自己的知识作答；
+* ``handoff`` 只在模型故障、或者确实生成不出任何回答时才用。
+
+「防胡说」靠的是**标注**，不是拒答：学生一眼能看出这句话是老师课件里写的，
+还是 AI 自己补充的，从而决定要不要拿它当复习依据。
 """
 
 from __future__ import annotations
 
+import sys
 import time
 from dataclasses import dataclass, field
 
 from .llm import LLMError, OpenAICompatClient
-from .retrieval import RetrievalResult, build_context, looks_like_complex_question, retrieve
+from .retrieval import (
+    RetrievalResult,
+    build_context,
+    looks_like_complex_question,
+    retrieve,
+)
 from .settings import Settings
 from .store import Hit, Store
 from .textutils import (
     extract_citation_pages,
     has_any_citation,
+    has_external_supplement,
     mentions_missing_coverage,
     validate_citations,
 )
@@ -23,7 +40,20 @@ from .websearch import WebSearchUnavailable, search as web_search
 
 MODE_KB = "kb"
 MODE_WEB = "web"
+MODE_GENERAL = "general"
 MODE_HANDOFF = "handoff"
+
+#: 前端和报告里显示的依据标签。措辞刻意直白，学生不用理解「RAG」是什么。
+SOURCE_LABELS = {
+    MODE_KB: "依据课件",
+    MODE_WEB: "网络搜索·未审核",
+    MODE_GENERAL: "课件未覆盖·通用知识",
+    MODE_HANDOFF: "需人工确认",
+}
+
+#: 外部作答（联网/通用知识）的默认抬头。可在 config/retrieval.yaml 的 external 段改。
+DEFAULT_WEB_NOTE = "【网络搜索结果·未经审核，请与课件核对】"
+DEFAULT_GENERAL_NOTE = "【课件未覆盖·以下为通用知识解答，仅供参考】"
 
 
 @dataclass
@@ -38,9 +68,19 @@ class Answer:
     model: str = ""
     latency_ms: int = 0
     note: str = ""
+    #: 联网作答时的来源链接，前端直接展示，学生可以点开核对
+    sources: list[str] = field(default_factory=list)
     #: 是否因模型调用失败而降级。降级时不能把「资料未覆盖」当成真的结论——
     #: 那会把「服务故障」说成「课件没有」，对学生是误导。
     failed: bool = False
+
+    @property
+    def source_level(self) -> str:
+        return self.mode
+
+    @property
+    def source_label(self) -> str:
+        return SOURCE_LABELS.get(self.mode, "")
 
     @property
     def page_labels(self) -> list[str]:
@@ -49,6 +89,38 @@ class Answer:
 
 def _handoff_text(settings: Settings) -> str:
     return settings.prompt("handoff_message")
+
+
+def _external_note(settings: Settings, key: str, default: str) -> str:
+    external = settings.retrieval.get("external") or {}
+    value = external.get(key) if isinstance(external, dict) else None
+    return str(value or default).strip()
+
+
+def _ensure_note(text: str, note: str) -> str:
+    """保证回答第一行是依据标签。
+
+    模型偶尔会忘掉这条格式要求，或者把它加粗。这里做一次兜底拼接，
+    而不是因为格式不合规就把整段回答扔掉——内容本身通常是对的。
+    """
+    body = (text or "").strip()
+    if not body:
+        return note
+    head = "\n".join(body.splitlines()[:2])
+    if note in head:
+        return body
+    # 容忍模型把【】换成其他括号、或者加了 ** 加粗
+    plain = note.strip("【】")
+    if plain and plain in head:
+        return body
+    return f"{note}\n\n{body}"
+
+
+def _labeled_block(title: str, content: str) -> str:
+    body = (content or "").strip()
+    if not body:
+        return ""
+    return f"{title}\n\n{body}\n\n"
 
 
 def answer_question(
@@ -65,44 +137,104 @@ def answer_question(
 ) -> Answer:
     started = time.perf_counter()
     course = course_id or settings.default_course_id
+    course_name = settings.course_name(course)
     model_name = generate_client.config.name
 
     def finish(answer: Answer) -> Answer:
         answer.latency_ms = int((time.perf_counter() - started) * 1000)
         if log:
-            store.log_qa(
-                {
-                    "course_id": course,
-                    "session_id": session_id,
-                    "question": question,
-                    "retrieved_chunk_ids": [hit.chunk_id for hit in answer.hits if hit.chunk_id],
-                    "answer": answer.text,
-                    "mode": answer.mode,
-                    "citations": answer.citations or None,
-                    "citation_valid": answer.citation_valid,
-                    "top_score": answer.top_score,
-                    "model": model_name,
-                    "latency_ms": answer.latency_ms,
-                }
-            )
+            try:
+                store.log_qa(
+                    {
+                        "course_id": course,
+                        "session_id": session_id,
+                        "question": question,
+                        "retrieved_chunk_ids": [
+                            hit.chunk_id for hit in answer.hits if hit.chunk_id
+                        ],
+                        "answer": answer.text,
+                        "mode": answer.mode,
+                        "citations": answer.citations or None,
+                        "citation_valid": answer.citation_valid,
+                        "top_score": answer.top_score,
+                        "model": model_name,
+                        "latency_ms": answer.latency_ms,
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001 - 日志失败不能拖垮回答
+                print(f"[警告] 问答日志写入失败：{exc}", file=sys.stderr)
         return answer
 
-    # ---- 复杂综合题：不进生成环节，直接转人工（方案 §4.2 的额外防线）----
-    if looks_like_complex_question(settings, question):
-        store.record_gap(course, question)
+    def handoff(note: str, *, hits=None, score: float = 0.0, failed: bool = False) -> Answer:
         return finish(
             Answer(
                 question=question,
                 mode=MODE_HANDOFF,
                 text=_handoff_text(settings),
+                hits=list(hits or []),
+                top_score=score,
                 model=model_name,
-                note="命中复杂题拦截规则",
+                note=note,
+                failed=failed,
             )
         )
 
-    # ---- ① 检索 + ② 依据判定 ----
+    def answer_external(
+        mode: str,
+        note: str,
+        context_block: str,
+        *,
+        hits=None,
+        score: float = 0.0,
+        sources=None,
+        note_extra: str = "",
+    ) -> Answer:
+        system = settings.prompt("qa_answer_external", "system").format(
+            course_name=course_name, mode_note=note
+        )
+        user = settings.prompt("qa_answer_external", "user").format(
+            context_block=context_block, question=question
+        )
+        try:
+            text = generate_client.chat(system=system, user=user)
+        except LLMError as exc:
+            return handoff(
+                f"外部作答失败：{exc}",
+                hits=hits,
+                score=score,
+                failed=True,
+            )
+
+        text = _ensure_note(text, note)
+        cited = extract_citation_pages(text)
+        note_parts = [note_extra] if note_extra else []
+        if cited:
+            # 外部作答里冒出来的页码没有依据，不能透给学生
+            note_parts.append(f"模型仍写了页码 {cited}，已忽略这些引用")
+        return finish(
+            Answer(
+                question=question,
+                mode=mode,
+                text=text,
+                hits=list(hits or []),
+                top_score=score,
+                citation_valid=not cited,
+                model=model_name,
+                note="；".join(part for part in note_parts if part),
+                sources=list(sources or []),
+            )
+        )
+
+    # ---- 复杂综合题：配置里的硬拦截（默认已清空，保留机制备用）----
+    if looks_like_complex_question(settings, question):
+        store.record_gap(course, question)
+        return handoff("命中复杂题拦截规则")
+
+    # ---- ① 检索 ----
+    result: RetrievalResult | None = None
+    retrieval_error = ""
     try:
-        result: RetrievalResult = retrieve(
+        result = retrieve(
             settings,
             store,
             embed_client,
@@ -111,142 +243,141 @@ def answer_question(
             rerank_client=rerank_client,
         )
     except LLMError as exc:
-        return finish(
-            Answer(
-                question=question,
-                mode=MODE_HANDOFF,
-                text=_handoff_text(settings),
-                model=model_name,
-                note=f"向量化失败：{exc}",
-                failed=True,
-            )
-        )
+        # 检索挂了不代表不能答：先记下原因，后面用联网/通用知识兜底
+        retrieval_error = f"向量检索失败：{exc}"
 
-    if not result.has_evidence:
-        store.record_gap(course, question)
-        if settings.retrieval.get("allow_web"):
-            try:
-                web = web_search(question)
-            except WebSearchUnavailable as exc:
-                return finish(
-                    Answer(
-                        question=question,
-                        mode=MODE_HANDOFF,
-                        text=_handoff_text(settings),
-                        hits=result.hits,
-                        top_score=result.top_score,
-                        model=model_name,
-                        note=f"无依据且联网不可用：{exc}",
+    fallback_hits = result.hits if result is not None else []
+    fallback_score = result.top_score if result is not None else 0.0
+    fallback_reason = retrieval_error
+
+    # ---- ② 课件里有依据：正常作答，要求带页码 ----
+    if result is not None and result.has_evidence:
+        context = build_context(settings, result.hits)
+        system = settings.prompt("qa_answer", "system").format(course_name=course_name)
+        user = settings.prompt("qa_answer", "user").format(
+            context=context, question=question
+        )
+        allowed = result.allowed_pages
+
+        text = ""
+        invalid: list[int] = []
+        passed = False
+        for attempt in range(2):
+            prompt_user = user
+            if attempt == 1:
+                good = "、".join(f"第 {page} 页" for page in sorted(allowed))
+                if invalid:
+                    bad = "、".join(f"第 {page} 页" for page in invalid)
+                    prompt_user += (
+                        f"\n\n注意：上一次回答里引用了参考资料中不存在的页码（{bad}）。"
+                        f"参考资料里真实存在的页码只有（{good}），请只用这些页码重新作答。"
                     )
-                )
-            return finish(
-                Answer(
-                    question=question,
-                    mode=MODE_WEB,
-                    text=web.text,
+                else:
+                    # 完全没有页码引用是另一种情况：不能拼出「不存在的页码（）」那种空话，
+                    # 要直接说清要求。实测模型会写出一段很好的回答却漏掉页码。
+                    prompt_user += (
+                        f"\n\n注意：上一次回答里一个页码都没有标注。"
+                        f"参考资料里的页码有（{good}）。"
+                        f"请重新作答，并在每个关键结论后面用（第 X 页）标出它出自哪一页。"
+                    )
+            try:
+                text = generate_client.chat(system=system, user=prompt_user)
+            except LLMError as exc:
+                return handoff(
+                    f"生成失败：{exc}",
                     hits=result.hits,
-                    top_score=result.top_score,
-                    citation_valid=False,
-                    model=model_name,
-                    note=f"联网兜底（{result.reason}），来源：{', '.join(web.sources[:3])}",
-                )
-            )
-
-        return finish(
-            Answer(
-                question=question,
-                mode=MODE_HANDOFF,
-                text=_handoff_text(settings),
-                hits=result.hits,
-                top_score=result.top_score,
-                model=model_name,
-                note=result.reason,
-            )
-        )
-
-    # ---- ③ 生成 ----
-    context = build_context(settings, result.hits)
-    system = settings.prompt("qa_answer", "system").format(
-        course_name=settings.course_name(course)
-    )
-    user = settings.prompt("qa_answer", "user").format(context=context, question=question)
-    allowed = result.allowed_pages
-
-    text = ""
-    invalid: list[int] = []
-    for attempt in range(2):
-        prompt_user = user
-        if attempt == 1:
-            if invalid:
-                bad = "、".join(f"第 {page} 页" for page in invalid)
-                good = "、".join(f"第 {page} 页" for page in sorted(allowed))
-                prompt_user += (
-                    f"\n\n注意：上一次回答里引用了参考资料中不存在的页码（{bad}）。"
-                    f"参考资料里真实存在的页码只有（{good}），请只用这些页码重新作答。"
-                )
-            else:
-                # 完全没有页码引用是另一种情况：不能拼出「不存在的页码（）」那种空话，
-                # 要直接说清要求。实测模型会写出一段很好的回答却漏掉页码。
-                good = "、".join(f"第 {page} 页" for page in sorted(allowed))
-                prompt_user += (
-                    f"\n\n注意：上一次回答里一个页码都没有标注。"
-                    f"参考资料里的页码有（{good}）。"
-                    f"请重新作答，并在每个关键结论后面用（第 X 页）标出它出自哪一页。"
-                )
-        try:
-            text = generate_client.chat(system=system, user=prompt_user)
-        except LLMError as exc:
-            return finish(
-                Answer(
-                    question=question,
-                    mode=MODE_HANDOFF,
-                    text=_handoff_text(settings),
-                    hits=result.hits,
-                    top_score=result.top_score,
-                    model=model_name,
-                    note=f"生成失败：{exc}",
+                    score=result.top_score,
                     failed=True,
                 )
+
+            ok, invalid = validate_citations(text, allowed)
+            if ok and has_any_citation(text):
+                passed = True
+                break
+            if (
+                ok
+                and not has_any_citation(text)
+                and not settings.retrieval.get("require_citation", True)
+            ):
+                passed = True
+                break
+
+        if passed:
+            gap_note = ""
+            if mentions_missing_coverage(text) or has_external_supplement(text):
+                store.record_gap(course, question)
+                gap_note = "回答里明确说了资料未完全覆盖，已记入知识缺口清单"
+            return finish(
+                Answer(
+                    question=question,
+                    mode=MODE_KB,
+                    text=text,
+                    citations=extract_citation_pages(text),
+                    citation_valid=True,
+                    hits=result.hits,
+                    top_score=result.top_score,
+                    model=model_name,
+                    note=gap_note,
+                )
             )
 
-        ok, invalid = validate_citations(text, allowed)
-        if ok and has_any_citation(text):
-            break
-        if ok and not has_any_citation(text) and not settings.retrieval.get("require_citation", True):
-            break
+        # 检索到了、但回答始终过不了页码校验：不要转人工，换成通用知识作答
+        store.record_gap(course, question)
+        fallback_reason = (
+            f"课件里有相关内容，但回答没能通过页码校验（越界页码 {invalid} 或没有引用）"
+        )
+    elif result is not None:
+        # 知识库里确实没有可用依据——这是内容缺口，记下来给补资料用
+        store.record_gap(course, question)
+        fallback_reason = result.reason or "课件里没有找到能回答这个问题的内容"
+
+    # ---- ③ 联网兜底 ----
+    web_error = ""
+    if settings.retrieval.get("allow_web", False):
+        try:
+            web = web_search(question)
+        except WebSearchUnavailable as exc:
+            web_error = str(exc)
+        else:
+            return answer_external(
+                MODE_WEB,
+                _external_note(settings, "web_note", DEFAULT_WEB_NOTE),
+                _labeled_block(
+                    "以下是从网络检索到的资料（未经审核，只作参考）：", web.context
+                ),
+                hits=fallback_hits,
+                score=fallback_score,
+                sources=web.sources,
+                note_extra=f"联网兜底（{web.provider}）；{fallback_reason}",
+            )
     else:
-        store.record_gap(course, question)
-        return finish(
-            Answer(
-                question=question,
-                mode=MODE_HANDOFF,
-                text=_handoff_text(settings),
-                hits=result.hits,
-                top_score=result.top_score,
-                citation_valid=False,
-                model=model_name,
-                note=f"引用校验未通过（越界页码 {invalid} 或没有任何页码引用）",
+        web_error = "联网未开启"
+
+    # ---- ④ 通用知识兜底 ----
+    if settings.retrieval.get("allow_general", True):
+        context_block = ""
+        if fallback_hits:
+            background = build_context(settings, fallback_hits[:3])
+            context_block = _labeled_block(
+                "以下是课件里与问题可能相关的片段。它们相关度不高，只作背景参考，"
+                "**不要当成答案依据，也不要标注它们的页码**：",
+                background,
             )
+        note_extra = fallback_reason
+        if web_error:
+            note_extra = f"{note_extra}；{web_error}" if note_extra else web_error
+        return answer_external(
+            MODE_GENERAL,
+            _external_note(settings, "general_note", DEFAULT_GENERAL_NOTE),
+            context_block,
+            hits=fallback_hits,
+            score=fallback_score,
+            note_extra=note_extra,
         )
 
-    ok, invalid = validate_citations(text, allowed)
-    # 回答了、也带了页码，但明确说了「资料没有覆盖」——这仍然是知识缺口，
-    # 必须记下来，否则这个缺口永远进不了待补资料清单。
-    gap_note = ""
-    if mentions_missing_coverage(text):
-        store.record_gap(course, question)
-        gap_note = "回答里明确说了资料未覆盖，已记入知识缺口清单"
-
-    return finish(
-        Answer(
-            question=question,
-            mode=MODE_KB,
-            text=text,
-            citations=extract_citation_pages(text),
-            citation_valid=ok,
-            hits=result.hits,
-            top_score=result.top_score,
-            model=model_name,
-            note=gap_note,
-        )
+    # ---- ⑤ 确实无法作答 ----
+    return handoff(
+        f"{fallback_reason}；{web_error}".strip("；"),
+        hits=fallback_hits,
+        score=fallback_score,
     )

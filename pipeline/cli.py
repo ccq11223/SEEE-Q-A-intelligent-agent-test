@@ -717,6 +717,10 @@ def cmd_golden(settings: Settings, args: argparse.Namespace) -> int:
                 mark = "编造嫌疑"
             elif result.handed_off:
                 mark = "转人工"
+            elif result.mode == "general":
+                mark = "通用知识兜底（已标注）"
+            elif result.mode == "web":
+                mark = "联网兜底（已标注）"
             else:
                 mark = "已说明缺口"
             info(
@@ -743,6 +747,8 @@ def cmd_golden(settings: Settings, args: argparse.Namespace) -> int:
                     info("        选择：未能从回答里识别出选项")
             if result.note:
                 info(f"        说明：{result.note}")
+            if result.mode:
+                info(f"        作答依据：{result.mode}")
         if result.error:
             warn(f"      运行出错：{result.error.splitlines()[0]}")
 
@@ -791,12 +797,13 @@ def cmd_golden(settings: Settings, args: argparse.Namespace) -> int:
     if not args.only_retrieval:
         if report.negative:
             info(
-                f"编造率：{report.fabrication_rate:.0%}"
+                f"冒充课件率：{report.fabrication_rate:.0%}"
                 f"（目标 ≤ {args.max_fabrication_rate:.0%}）"
             )
         else:
-            info("编造率：本次没有跑到负样本，未评估")
+            info("冒充课件率：本次没有跑到负样本，未评估")
         info(f"回答可用率：{report.answer_rate:.0%}")
+        info(f"课件依据率：{report.kb_rate:.0%}（其余为联网/通用知识兜底）")
         if report.negative:
             info(f"负样本转人工率：{report.handoff_rate:.0%}")
         if report.choice_cases:
@@ -809,7 +816,10 @@ def cmd_golden(settings: Settings, args: argparse.Namespace) -> int:
 
     fabricated = [item for item in report.results if item.fabricated]
     if fabricated:
-        warn(f"有 {len(fabricated)} 道负样本被编造：{', '.join(item.case.id for item in fabricated)}")
+        warn(
+            f"有 {len(fabricated)} 道负样本把课外内容当成了课件内容："
+            f"{', '.join(item.case.id for item in fabricated)}"
+        )
 
     ok = (
         report.hit_rate >= args.min_hit_rate

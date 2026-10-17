@@ -213,9 +213,33 @@ class TestCaseVerdicts(unittest.TestCase):
         )
         self.assertFalse(result.fabricated)
 
+    def test_kb_answer_with_external_supplement_section_is_not_fabrication(self) -> None:
+        # 课件讲了一部分、模型补了一段并明确标成「课件外补充」，学生看得到边界
+        result = self.negative(
+            mode="kb",
+            answer=(
+                "课件里相关的只有一阶低通电路（第32页）。\n\n"
+                "【课件外补充·仅供参考】\n阶数主要由过渡带陡峭程度决定。"
+            ),
+        )
+        self.assertFalse(result.fabricated)
+
     def test_answering_as_if_it_were_in_the_material_is_fabrication(self) -> None:
         result = self.negative(mode="kb", answer="回转器的回转电阻通常取 1kΩ 左右（第31页）。")
         self.assertTrue(result.fabricated)
+
+    def test_labelled_external_answer_is_not_fabrication(self) -> None:
+        # 阶段 2：课件没覆盖时允许用通用知识作答，只要标签写清楚就不算编造
+        general = self.negative(
+            mode="general",
+            answer="【课件未覆盖·以下为通用知识解答，仅供参考】\n回转器可以把阻抗取反。",
+        )
+        self.assertFalse(general.fabricated)
+        web = self.negative(
+            mode="web",
+            answer="【网络搜索结果·未经审核，请与课件核对】\n回转器……",
+        )
+        self.assertFalse(web.fabricated)
 
     def test_retrieval_only_mode_does_not_judge_fabrication(self) -> None:
         # 没调用生成模型，mode 为空，不能拿它判编造

@@ -9,8 +9,11 @@
 题集文件是 ``tests/golden/qa.jsonl``，每题一行 JSON。两种题型：
 
 * **正样本**（``negative: false``）：资料里确实有，用于测命中率；
-* **负样本**（``negative: true``）：资料里根本没有，用于测**编造率**——
-  这 10 道题是整套测试里价值最高的部分。
+* **负样本**（``negative: true``）：资料里根本没有，用于测**会不会把课外内容
+  冒充成课件内容**——这 10 道题是整套测试里价值最高的部分。
+
+阶段 2 的产品口径变了：课件没覆盖时允许联网/通用知识作答，但必须标注来源。
+所以「编造」不再等于「答了」，而是「走了课件分支、却没有说明课件没覆盖」。
 """
 
 from __future__ import annotations
@@ -27,7 +30,7 @@ from .llm import LLMError, OpenAICompatClient
 from .retrieval import RetrievalResult, retrieve
 from .settings import Settings
 from .store import Store
-from .textutils import mentions_missing_coverage
+from .textutils import has_external_supplement, mentions_missing_coverage
 
 VALID_STATUS = ("draft", "ready")
 
@@ -491,7 +494,14 @@ class CaseResult:
 
     @property
     def answered(self) -> bool:
-        """正样本是否给出了带有效引用的回答。"""
+        """正样本是否给出了回答（课件、联网、通用知识都算）。"""
+        if self.mode == "kb":
+            return self.citation_valid
+        return self.mode in ("web", "general")
+
+    @property
+    def answered_from_kb(self) -> bool:
+        """是否真的用课件内容作答（而不是靠联网或模型自己的知识兜底）。"""
         return self.mode == "kb" and self.citation_valid
 
     @property
@@ -521,17 +531,22 @@ class CaseResult:
 
     @property
     def fabricated(self) -> bool:
-        """负样本里最需要警惕的行为：不仅答了，还没有说明「资料里没有」。
+        """负样本里最需要警惕的行为：把课件外的内容说成课件依据。
 
-        注意：如果模型明确说了「现有资料没有覆盖」再补充相关内容，那不算编造——
-        实测这是它表现最好的一种方式（诚实说明边界 + 给出确实有的相关内容）。
+        阶段 2 起，「课件没覆盖」时会先标注「网络搜索 / 通用知识」再作答，
+        这不算编造——学生看得到来源，能自己判断要不要信。
+        只有走了 ``kb`` 分支（回答里带课件页码、暗示这是课件内容），
+        又没有说明课件里其实没有，才是真正的误导。
         """
         if not self.case.negative:
             return False
         # 仅检索模式没调用生成模型，无从判断说没说「资料里没有」
         if not self.mode:
             return False
-        if self.mode == "handoff":
+        if self.mode != "kb":
+            return False
+        # 回答里明确开了「课件外补充」小节，等于告诉学生这段不是课件内容
+        if has_external_supplement(self.answer):
             return False
         return not mentions_missing_coverage(self.answer)
 
@@ -648,11 +663,33 @@ class GoldenReport:
         graded = [
             item
             for item in self.results
-            if not item.case.negative and item.case.expect_points and item.mode == "kb"
+            if not item.case.negative and item.case.expect_points and item.answered
         ]
         if not graded:
             return 1.0
         return sum(item.point_rate for item in graded) / len(graded)
+
+    @property
+    def kb_rate(self) -> float:
+        """正样本里「真的用课件作答」的比例。
+
+        这是阶段 2 最重要的质量指标：回答可用率接近 100% 是兜底策略带来的，
+        课件依据率才说明知识库本身有没有命中。两者差距越大，越说明这份资料
+        还需要补，或者检索还需要调。
+        """
+        graded = [item for item in self.positive if item.mode]
+        if not graded:
+            return 1.0
+        return sum(1 for item in graded if item.answered_from_kb) / len(graded)
+
+    @property
+    def mode_counts(self) -> dict[str, int]:
+        """各档依据出现的次数，用来一眼看出兜底比例。"""
+        counts: dict[str, int] = {}
+        for item in self.results:
+            if item.mode:
+                counts[item.mode] = counts.get(item.mode, 0) + 1
+        return counts
 
     @property
     def choice_cases(self) -> list[CaseResult]:
@@ -823,11 +860,12 @@ def render_report(
     )
     lines.append(f"| 前置命中率 | {report.front_hit_rate:.0%} | 观察项 | — |")
     lines.append(
-        f"| 编造率 | {report.fabrication_rate:.0%} | ≤ {fab_target:.0%} | "
+        f"| 冒充课件率 | {report.fabrication_rate:.0%} | ≤ {fab_target:.0%} | "
         f"{'✅ 达标' if fab_ok else '❌ 不达标'} |"
     )
     if not report.retrieval_only:
         lines.append(f"| 回答可用率 | {report.answer_rate:.0%} | 观察项 | — |")
+        lines.append(f"| 课件依据率 | {report.kb_rate:.0%} | 观察项 | — |")
         if report.choice_cases:
             lines.append(
                 f"| 选择题正确率 | {report.choice_accuracy:.0%} | 100% | "
@@ -839,11 +877,18 @@ def render_report(
         lines.append(f"| 负样本转人工率 | {report.handoff_rate:.0%} | 观察项 | — |")
     if not report.negative:
         lines.append("> 本次没有跑到负样本，编造率与转人工率不作数。")
+    if report.mode_counts:
+        dist = "、".join(
+            f"{mode} {count}" for mode, count in sorted(report.mode_counts.items())
+        )
+        lines.append(f"> 本次依据分布：{dist}。`general`/`web` 越多，说明课件覆盖越不足。")
     lines.append("")
     lines.extend(
         [
             "> 检索命中率 = 期望页码出现在**召回的全部 20 条**里；"
             "前置命中率 = 出现在**真正交给模型的前 5 条**里。",
+            "> 冒充课件率 = 负样本里「走了课件分支、却没说明课件其实没讲」的比例。"
+            "联网/通用知识作答、以及带「课件外补充」小节的回答都不计入。",
             "> 两者差距大说明召回没问题但排序有问题，往往比命中率本身更值得调。",
             ">",
             "> **要点覆盖率**是唯一能发现「页码引用正确、但结论说反了」的指标。"
@@ -883,8 +928,8 @@ def render_report(
             [
                 "## ⚠️ 编造嫌疑（最需要处理的一类）",
                 "",
-                "模型既回答了、又没有说明「资料里没有这件东西」。"
-                "按方案要求，这类必须全部被拦截为转人工。",
+                "负样本走了「依据课件」分支，回答里却没有说明课件其实没讲这件事——"
+                "等于把课外内容冒充成了课件内容。这类必须逐个打开看。",
                 "",
             ]
         )
@@ -908,7 +953,7 @@ def render_report(
     unanswered = [
         item
         for item in report.positive
-        if not item.error and item.mode != "kb"
+        if not item.error and not item.answered
     ]
     if unanswered and not report.retrieval_only:
         lines.extend(
@@ -922,6 +967,27 @@ def render_report(
         for item in unanswered:
             lines.append(
                 f"- `{item.case.id}`（模式 `{item.mode}`）：{item.note or '（没有说明）'}"
+            )
+        lines.append("")
+
+    fallback = [
+        item
+        for item in report.positive
+        if not item.error and item.mode in ("web", "general")
+    ]
+    if fallback and not report.retrieval_only:
+        lines.extend(
+            [
+                "## 正样本靠兜底作答（课件没命中，但学生仍拿到了答案）",
+                "",
+                "这些题不算失败——学生的问题被回答了；但它们是最该优先补资料的清单。",
+                "",
+            ]
+        )
+        for item in fallback:
+            lines.append(
+                f"- `{item.case.id}`（`{item.mode}`）：{item.case.question}"
+                f"　期望第 {item.case.expect_pages} 页，实际最高分 {item.top_score:.3f}"
             )
         lines.append("")
 

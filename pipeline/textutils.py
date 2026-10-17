@@ -240,6 +240,17 @@ _NO_COVERAGE_PATTERNS = (
 #: 模型按提示词要求写的显式标记。比猜措辞可靠得多，出现在哪儿都认。
 COVERAGE_MARKER = "【资料未覆盖】"
 
+#: 课件只覆盖了一部分时，模型用来标出「这一段是课外知识」的标题。
+#: 它和「资料未覆盖」是两种不同的话：前者是「课件讲了大部分，我补一点」，
+#: 后者是「课件根本没讲」。两者都说明资料不够完整，都要记进缺口清单。
+EXTERNAL_SUPPLEMENT_MARKER = "【课件外补充"
+
+
+def has_external_supplement(answer: str) -> bool:
+    """回答里是否出现了「课件外补充」小节。"""
+    return EXTERNAL_SUPPLEMENT_MARKER in answer
+
+
 #: 没有标记时的兜底：只看开头这么多字。「资料没覆盖」这种结论一定写在开头，
 #: 写在后面的通常只是针对某个细节或某个干扰项的说明。
 COVERAGE_HEAD_CHARS = 120

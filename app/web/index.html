@@ -15,6 +15,8 @@
     --brand-soft: #e8f0f8;
     --warn: #a15c00;
     --warn-soft: #fff4e0;
+    --gray: #55606e;
+    --gray-soft: #eef1f5;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
@@ -82,12 +84,18 @@
   .me .bubble { background: var(--brand); color: #fff; border-bottom-right-radius: 4px; }
   .bot .bubble { background: var(--bg); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
   .bot.handoff .bubble { background: var(--warn-soft); border-color: #f0d9b0; color: #5c3a00; }
+  .bot.web .bubble { background: #fffaf0; border-color: #f0d9b0; }
+  .bot.general .bubble { background: #f8f9fb; border-color: #dfe4ea; }
   .meta { margin-top: 5px; font-size: 12px; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; }
+  .meta a { color: var(--brand); text-decoration: none; }
+  .meta a:hover { text-decoration: underline; }
   .tag {
     display: inline-block; padding: 1px 7px; border-radius: 999px;
     background: var(--brand-soft); color: var(--brand); font-size: 11px;
   }
-  .handoff .tag { background: #f6e3c1; color: var(--warn); }
+  .tag.handoff { background: #f6e3c1; color: var(--warn); }
+  .tag.web { background: #fdf0d5; color: #8a5a00; }
+  .tag.general { background: var(--gray-soft); color: var(--gray); }
   .typing { color: var(--muted); font-size: 13px; }
   footer {
     border-top: 1px solid var(--line);
@@ -180,7 +188,25 @@ function addMessage(text, who, meta) {
   if (meta) {
     const m = document.createElement('div');
     m.className = 'meta';
-    m.innerHTML = meta;
+    if (meta.tag) {
+      const tag = document.createElement('span');
+      tag.className = 'tag ' + (meta.level || '');
+      tag.textContent = meta.tag;
+      m.appendChild(tag);
+    }
+    if (meta.detail) {
+      const detail = document.createElement('span');
+      detail.textContent = meta.detail;
+      m.appendChild(detail);
+    }
+    (meta.sources || []).forEach((url, index) => {
+      const link = document.createElement('a');
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = '来源' + (index + 1);
+      m.appendChild(link);
+    });
     box.appendChild(m);
   }
   chat.appendChild(box);
@@ -255,15 +281,24 @@ async function send() {
       return;
     }
 
+    const level = data.source_level || data.mode || 'kb';
+    const labelMap = {
+      kb: '依据课件',
+      web: '网络搜索·未审核',
+      general: '课件未覆盖·通用知识',
+      handoff: '需人工确认'
+    };
     const pages = data.citations && data.citations.length
       ? '第 ' + data.citations.join('、') + ' 页' : '';
-    const tag = data.handoff
-      ? '<span class="tag">资料未覆盖</span>'
-      : '<span class="tag">依据课件</span>';
-    const meta = tag + (pages ? ' <span>' + pages + '</span>' : '') +
-                 '<span>' + (data.latency_ms / 1000).toFixed(1) + ' 秒</span>';
-    const box = addMessage(data.answer, 'bot', meta);
-    if (data.handoff) box.classList.add('handoff');
+    const detail = [pages, (data.latency_ms / 1000).toFixed(1) + ' 秒']
+      .filter(Boolean).join(' · ');
+    const box = addMessage(data.answer, 'bot', {
+      level: level,
+      tag: data.source_label || labelMap[level] || '',
+      detail: detail,
+      sources: data.sources || []
+    });
+    box.classList.add(level);
   } catch (err) {
     pending.remove();
     showError('网络好像不太行，请稍后重试');

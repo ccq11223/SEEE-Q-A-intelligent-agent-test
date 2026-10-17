@@ -53,10 +53,11 @@ class AppTestCase(unittest.TestCase):
         reply="节点电流定律说明流入等于流出（第 12 页）。",
         rerank_score=0.95,
         limit=30,
+        settings_overrides=None,
     ) -> TestClient:
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        settings = make_settings(Path(self.tmp.name))
+        settings = make_settings(Path(self.tmp.name), **(settings_overrides or {}))
         services = Services(
             settings=settings,
             store=FakeStore(hits if hits is not None else [make_hit()]),
@@ -115,11 +116,27 @@ class TestAsk(AppTestCase):
         self.assertIn("第 12 页", data["answer"])
         self.assertEqual(data["citations"], [12])
 
-    def test_no_evidence_returns_handoff_flag(self) -> None:
-        client = self.build(hits=[make_hit(score=0.01)], rerank_score=0.05)
+    def test_no_evidence_answers_from_general_knowledge(self) -> None:
+        client = self.build(
+            hits=[make_hit(score=0.01)],
+            rerank_score=0.05,
+            reply="替代定理适用于线性电路，具体条件如下……",
+        )
         resp = self.ask(client, "回转器怎么用？")
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
+        self.assertFalse(data["handoff"])
+        self.assertEqual(data["mode"], "general")
+        self.assertEqual(data["source_level"], "general")
+        self.assertIn("课件未覆盖", data["answer"].splitlines()[0])
+
+    def test_handoff_only_when_fallbacks_are_disabled(self) -> None:
+        client = self.build(
+            hits=[make_hit(score=0.01)],
+            rerank_score=0.05,
+            settings_overrides={"retrieval": {"allow_general": False}},
+        )
+        data = self.ask(client, "回转器怎么用？").json()
         self.assertTrue(data["handoff"])
         self.assertEqual(data["mode"], "handoff")
 

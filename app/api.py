@@ -7,6 +7,7 @@ import re
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from pipeline import websearch
 from pipeline.answer import answer_question
 from pipeline.llm import LLMError
 
@@ -23,8 +24,12 @@ class AskRequest(BaseModel):
 
 class AskResponse(BaseModel):
     mode: str
+    #: 依据等级：kb / web / general / handoff。前端据此显示不同颜色的标签
+    source_level: str = "kb"
+    source_label: str = ""
     answer: str
     citations: list[int] = []
+    sources: list[str] = []
     handoff: bool = False
     latency_ms: int = 0
     top_score: float = 0.0
@@ -54,6 +59,7 @@ def health(request: Request) -> dict[str, object]:
         "backend": services.store.backend,
         "generate_model": services.generate.config.name,
         "rerank_enabled": services.rerank is not None,
+        "web_search": websearch.configured_provider() or "off",
     }
 
 
@@ -114,8 +120,11 @@ def ask(payload: AskRequest, request: Request) -> AskResponse:
 
     return AskResponse(
         mode=result.mode,
+        source_level=result.source_level,
+        source_label=result.source_label,
         answer=result.text,
         citations=result.citations,
+        sources=result.sources,
         handoff=result.mode == "handoff",
         latency_ms=result.latency_ms,
         top_score=round(result.top_score, 4),

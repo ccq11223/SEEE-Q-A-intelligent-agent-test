@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from pipeline.answer import MODE_HANDOFF, MODE_KB, answer_question
+from pipeline.answer import MODE_GENERAL, MODE_HANDOFF, MODE_KB, answer_question
 from pipeline.store import Hit
 from tests.support import FakeEmbedder, FakeGenerator, FakeStore, make_settings
 
@@ -46,29 +46,30 @@ class TestAnswerFlow(unittest.TestCase):
         self.assertEqual(len(store.qa_logs), 1)
         self.assertEqual(store.gaps, [])
 
-    def test_low_score_triggers_handoff_and_records_gap(self) -> None:
+    def test_low_score_falls_back_to_general_and_records_gap(self) -> None:
         store = FakeStore([hit(12, score=0.05)])
-        generator = FakeGenerator(["不该被调用（第 12 页）"])
+        generator = FakeGenerator(["节点电流定律说明流入等于流出。"])
         answer = self.run_answer(store, generator)
-        self.assertEqual(answer.mode, MODE_HANDOFF)
+        self.assertEqual(answer.mode, MODE_GENERAL)
         self.assertEqual(len(store.gaps), 1)
-        self.assertEqual(generator.prompts, [])
+        self.assertEqual(len(generator.prompts), 1)
+        self.assertIn("课件未覆盖", answer.text.splitlines()[0])
 
-    def test_empty_knowledge_base_triggers_handoff(self) -> None:
+    def test_empty_knowledge_base_still_answers_from_general_knowledge(self) -> None:
         store = FakeStore([])
-        answer = self.run_answer(store, FakeGenerator())
-        self.assertEqual(answer.mode, MODE_HANDOFF)
+        answer = self.run_answer(store, FakeGenerator(["节点电流定律是 KCL 的另一种叫法。"]))
+        self.assertEqual(answer.mode, MODE_GENERAL)
         self.assertEqual(len(store.gaps), 1)
 
-    def test_invalid_citation_is_retried_then_handed_off(self) -> None:
+    def test_invalid_citation_is_retried_then_answered_externally(self) -> None:
         store = FakeStore([hit(12)])
         generator = FakeGenerator(
-            ["结论见（第 99 页）。", "仍然见（第 98 页）。"]
+            ["结论见（第 99 页）。", "仍然见（第 98 页）。", "改用通用知识作答。"]
         )
         answer = self.run_answer(store, generator)
-        self.assertEqual(answer.mode, MODE_HANDOFF)
-        self.assertFalse(answer.citation_valid)
-        self.assertEqual(len(generator.prompts), 2)
+        self.assertEqual(answer.mode, MODE_GENERAL)
+        self.assertTrue(answer.citation_valid)
+        self.assertEqual(len(generator.prompts), 3)
         self.assertIn("第 99 页", generator.prompts[1])
         self.assertEqual(len(store.gaps), 1)
 
@@ -81,11 +82,12 @@ class TestAnswerFlow(unittest.TestCase):
         self.assertEqual(answer.mode, MODE_KB)
         self.assertEqual(answer.citations, [12])
 
-    def test_answer_without_citation_is_rejected(self) -> None:
+    def test_answer_without_citation_falls_back_to_general(self) -> None:
         store = FakeStore([hit(12)])
         generator = FakeGenerator(["这是一个没有任何页码引用的回答。"] * 2)
         answer = self.run_answer(store, generator)
-        self.assertEqual(answer.mode, MODE_HANDOFF)
+        self.assertEqual(answer.mode, MODE_GENERAL)
+        self.assertEqual(len(generator.prompts), 3)
 
     def test_complex_question_is_handed_off_without_calling_models(self) -> None:
         store = FakeStore([hit(12)])
@@ -103,11 +105,22 @@ class TestAnswerFlow(unittest.TestCase):
         self.assertEqual(answer.mode, MODE_KB)
         self.assertEqual(answer.citations, [13])
 
-    def test_web_branch_is_off_by_default(self) -> None:
+    def test_web_is_off_by_default_but_general_still_answers(self) -> None:
         self.assertFalse(self.settings.retrieval.get("allow_web"))
         store = FakeStore([hit(12, score=0.01)])
-        answer = self.run_answer(store, FakeGenerator())
+        answer = self.run_answer(store, FakeGenerator(["通用知识回答。"]))
+        self.assertEqual(answer.mode, MODE_GENERAL)
+
+    def test_no_fallback_configured_hands_off(self) -> None:
+        settings = make_settings(
+            Path(self.tmp.name), retrieval={"allow_general": False}
+        )
+        store = FakeStore([hit(12, score=0.01)])
+        answer = answer_question(
+            settings, store, self.embedder, FakeGenerator(), "节点电流定律是什么？"
+        )
         self.assertEqual(answer.mode, MODE_HANDOFF)
+        self.assertEqual(len(store.gaps), 1)
 
     def test_answer_without_citation_is_retried_with_clear_instruction(self) -> None:
         # 实测：模型写出一段很好的回答但一个页码都没标，被引用校验拦下。

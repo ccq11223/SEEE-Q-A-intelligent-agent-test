@@ -152,9 +152,14 @@ def make_settings(root: Path, **overrides) -> Settings:
         "min_score": 0.3,
         "require_citation": True,
         "allow_web": False,
+        "allow_general": True,
         "max_context_chars": 4000,
         "max_trust_level": 2,
         "handoff_patterns": ["综合题"],
+        "external": {
+            "web_note": "【网络搜索结果·未经审核，请与课件核对】",
+            "general_note": "【课件未覆盖·以下为通用知识解答，仅供参考】",
+        },
     }
     retrieval.update(overrides.pop("retrieval", {}))
 
@@ -165,6 +170,10 @@ def make_settings(root: Path, **overrides) -> Settings:
             "user": "{course_name}/{doc_title}/{page_no}/{page_count}",
         },
         "qa_answer": {"system": "《{course_name}》助教", "user": "{context}\n---\n{question}"},
+        "qa_answer_external": {
+            "system": "外部作答：{mode_note}",
+            "user": "{context_block}\n---\n{question}",
+        },
         "handoff_message": "这个知识点现有资料里没有覆盖，建议找学长学姐线下确认。",
     }
     prompts.update(overrides.pop("prompts", {}))
