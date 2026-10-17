@@ -38,6 +38,9 @@ class Answer:
     model: str = ""
     latency_ms: int = 0
     note: str = ""
+    #: 是否因模型调用失败而降级。降级时不能把「资料未覆盖」当成真的结论——
+    #: 那会把「服务故障」说成「课件没有」，对学生是误导。
+    failed: bool = False
 
     @property
     def page_labels(self) -> list[str]:
@@ -58,6 +61,7 @@ def answer_question(
     course_id: str | None = None,
     log: bool = True,
     rerank_client: OpenAICompatClient | None = None,
+    session_id: int | None = None,
 ) -> Answer:
     started = time.perf_counter()
     course = course_id or settings.default_course_id
@@ -69,6 +73,7 @@ def answer_question(
             store.log_qa(
                 {
                     "course_id": course,
+                    "session_id": session_id,
                     "question": question,
                     "retrieved_chunk_ids": [hit.chunk_id for hit in answer.hits if hit.chunk_id],
                     "answer": answer.text,
@@ -113,6 +118,7 @@ def answer_question(
                 text=_handoff_text(settings),
                 model=model_name,
                 note=f"向量化失败：{exc}",
+                failed=True,
             )
         )
 
@@ -199,6 +205,7 @@ def answer_question(
                     top_score=result.top_score,
                     model=model_name,
                     note=f"生成失败：{exc}",
+                    failed=True,
                 )
             )
 

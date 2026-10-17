@@ -1,19 +1,20 @@
-# 在线服务（阶段 2 开始填充）
+# 在线答疑服务（阶段 2）
 
-这个目录将来放 FastAPI 应用：学生端答疑页面、诊断题组、学情报告、维护者后台。
-
-现在它是空的，因为**建库还没跑完**——先有知识库，在线服务才有东西可查。
-
-阶段 2 会在这里放：
+学生端：打开链接 → 填一个匿名代号 → 提问 → 得到带页码引用的回答；
+资料没覆盖时如实说明并建议线下确认。
 
 ```
 app/
-├── main.py            应用入口
-├── api/               接口：答疑、诊断、报告、后台
-├── core/              检索、生成、引用校验、转人工判定（复用 pipeline/retrieval.py 与 pipeline/answer.py）
-├── db/                数据模型与访问层（复用 pipeline/store.py）
-└── web/               学生端与后台页面
+├── main.py        FastAPI 应用入口（create_app / app）
+├── api.py         接口：/api/config、/api/health、/api/ask
+├── services.py    依赖组装（复用 pipeline 的检索与决策链）
+├── ratelimit.py   每 IP 每小时提问上限
+├── config.py      读取 config/app.yaml
+└── web/index.html 学生端页面（单文件、手机优先、无构建步骤）
 ```
 
-关键约定：**在线服务不重新实现任何建库逻辑**，直接复用 `pipeline/` 里的
-检索与答疑决策链，保证「自检时怎么判、学生用时也怎么判」。
+**关键约定：在线服务不重新实现任何建库逻辑**，直接复用
+`pipeline/retrieval.py` 与 `pipeline/answer.py`，
+保证「自检时怎么判、学生用时也怎么判」。
+
+启动与对外发布见 [docs/在线服务使用指南.md](../docs/在线服务使用指南.md)。

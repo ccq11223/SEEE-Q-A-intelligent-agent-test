@@ -717,6 +717,10 @@ def run_case(
             result.citations = list(answer.citations)
             result.citation_valid = answer.citation_valid
             result.answer = answer.text
+            if answer.failed:
+                # 模型故障导致的降级不算「系统正确地转人工」，
+                # 否则指标会被虚高的「已转人工」撑起来
+                result.error = answer.note or "模型调用失败，已降级为转人工"
             if case.source_doc:
                 others = foreign_docs(answer.hits, case.source_doc)
                 if others:

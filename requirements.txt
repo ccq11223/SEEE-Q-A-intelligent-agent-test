@@ -14,3 +14,7 @@ python-pptx>=1.0     # 读 PPT 文本框（hybrid 模式与兜底）
 # Windows 下把 PPTX / DOCX 导出成逐页图片（需要本机安装桌面版 Office；
 # 没有 Office 时可改用 LibreOffice，代码会自动回落）
 pywin32>=306; sys_platform == "win32"
+
+# 阶段 2：在线答疑服务
+fastapi>=0.115
+uvicorn[standard]>=0.30

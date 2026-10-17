@@ -153,6 +153,13 @@ class Store:
     def log_qa(self, payload: dict[str, Any]) -> None:
         """问答日志（阶段 2 在线服务写入；流水线自检也会写一条）。"""
 
+    def ensure_session(self, course_id: str, anon_code: str) -> int | None:
+        """按匿名代号登记/复用一次学生会话，返回会话 id（本地后端返回 None）。
+
+        刻意只存 anon_code：方案 §1.3 明确不收集姓名学号，学情报告也用匿名代号。
+        """
+        return None
+
     def record_gap(self, course_id: str, question: str) -> None:
         """知识缺口登记。"""
 
@@ -307,6 +314,10 @@ class LocalStore(Store):
         payload = {**payload, "created_at": _now()}
         rows.append(payload)
         _write_jsonl_atomic(self.qa_path, rows)
+
+    def ensure_session(self, course_id: str, anon_code: str) -> int | None:
+        # 本地后端没有会话表，匿名代号随日志一起存下来即可
+        return None
 
     def record_gap(self, course_id: str, question: str) -> None:
         rows = _read_jsonl(self.gaps_path)
@@ -527,15 +538,16 @@ class PostgresStore(Store):
     def log_qa(self, payload: dict[str, Any]) -> None:
         sql = """
             insert into qa_logs (
-                course_id, question, retrieved_chunk_ids, answer, mode,
+                course_id, session_id, question, retrieved_chunk_ids, answer, mode,
                 citations, citation_valid, top_score, model, latency_ms
             ) values (
-                %(course_id)s, %(question)s, %(retrieved_chunk_ids)s, %(answer)s,
-                %(mode)s, %(citations)s, %(citation_valid)s, %(top_score)s,
-                %(model)s, %(latency_ms)s
+                %(course_id)s, %(session_id)s, %(question)s, %(retrieved_chunk_ids)s,
+                %(answer)s, %(mode)s, %(citations)s, %(citation_valid)s,
+                %(top_score)s, %(model)s, %(latency_ms)s
             )
         """
         payload = {
+            "session_id": None,
             "retrieved_chunk_ids": None,
             "answer": None,
             "citations": None,
@@ -548,6 +560,23 @@ class PostgresStore(Store):
         with self._conn.cursor() as cur:
             cur.execute(sql, payload)
         self._conn.commit()
+
+    def ensure_session(self, course_id: str, anon_code: str) -> int | None:
+        with self._conn.cursor() as cur:
+            # on conflict 里做一次无效更新，只是为了能 RETURNING 拿到已有 id
+            cur.execute(
+                """
+                insert into student_sessions (course_id, anon_code)
+                values (%s, %s)
+                on conflict (course_id, anon_code)
+                do update set anon_code = excluded.anon_code
+                returning id
+                """,
+                (course_id, anon_code),
+            )
+            row = cur.fetchone()
+        self._conn.commit()
+        return int(row[0]) if row else None
 
     def record_gap(self, course_id: str, question: str) -> None:
         with self._conn.cursor() as cur:

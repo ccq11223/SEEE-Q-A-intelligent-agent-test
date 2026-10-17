@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f4e79">
+<title>课程答疑</title>
+<style>
+  :root {
+    --ink: #1c2430;
+    --muted: #6b7684;
+    --line: #e3e8ef;
+    --bg: #f5f7fa;
+    --brand: #1f4e79;
+    --brand-soft: #e8f0f8;
+    --warn: #a15c00;
+    --warn-soft: #fff4e0;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI",
+          "Microsoft YaHei", "PingFang SC", sans-serif;
+    display: flex;
+    justify-content: center;
+  }
+  .app {
+    width: 100%;
+    max-width: 720px;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+    box-shadow: 0 0 24px rgba(20, 30, 50, .06);
+  }
+  header {
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid var(--line);
+    background: #fff;
+  }
+  h1 { margin: 0 0 4px; font-size: 17px; letter-spacing: .2px; }
+  .intro { margin: 0; color: var(--muted); font-size: 13px; white-space: pre-line; }
+  .who { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+  .who label { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .who input {
+    flex: 1; min-width: 0;
+    padding: 7px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font: inherit; font-size: 13px;
+    background: #fbfcfe;
+  }
+  .who button {
+    padding: 7px 10px;
+    border: 1px solid var(--line);
+    background: #fff; color: var(--muted);
+    border-radius: 8px; font: inherit; font-size: 12px;
+    cursor: pointer; white-space: nowrap;
+  }
+  .who button:hover { border-color: var(--brand); color: var(--brand); }
+  main {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    scroll-behavior: smooth;
+  }
+  .msg { display: flex; flex-direction: column; max-width: 92%; }
+  .msg.me { align-self: flex-end; align-items: flex-end; }
+  .msg.bot { align-self: flex-start; align-items: flex-start; }
+  .bubble {
+    padding: 10px 13px;
+    border-radius: 12px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .me .bubble { background: var(--brand); color: #fff; border-bottom-right-radius: 4px; }
+  .bot .bubble { background: var(--bg); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+  .bot.handoff .bubble { background: var(--warn-soft); border-color: #f0d9b0; color: #5c3a00; }
+  .meta { margin-top: 5px; font-size: 12px; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; }
+  .tag {
+    display: inline-block; padding: 1px 7px; border-radius: 999px;
+    background: var(--brand-soft); color: var(--brand); font-size: 11px;
+  }
+  .handoff .tag { background: #f6e3c1; color: var(--warn); }
+  .typing { color: var(--muted); font-size: 13px; }
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+    background: #fff;
+  }
+  .composer { display: flex; gap: 8px; align-items: flex-end; }
+  textarea {
+    flex: 1;
+    min-height: 42px; max-height: 132px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    font: inherit; resize: none;
+    background: #fbfcfe;
+  }
+  textarea:focus, .who input:focus { outline: 2px solid var(--brand-soft); border-color: var(--brand); }
+  #send {
+    padding: 0 16px; height: 42px;
+    border: none; border-radius: 10px;
+    background: var(--brand); color: #fff;
+    font: inherit; cursor: pointer;
+  }
+  #send:disabled { background: #b8c4d2; cursor: default; }
+  .hint { margin: 8px 2px 0; font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; gap: 10px; }
+  .error { color: #b3261e; font-size: 13px; margin-top: 8px; display: none; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1 id="title">课程答疑</h1>
+    <p class="intro" id="intro"></p>
+    <div class="who">
+      <label for="anon">匿名代号</label>
+      <input id="anon" maxlength="16" placeholder="例如 xh-2026-07" autocomplete="off">
+      <button id="random" type="button">随机</button>
+    </div>
+  </header>
+
+  <main id="chat"></main>
+
+  <footer>
+    <div class="composer">
+      <textarea id="q" rows="1" placeholder="输入你的问题"></textarea>
+      <button id="send" type="button">发送</button>
+    </div>
+    <div class="hint">
+      <span id="disclaimer"></span>
+      <span><span id="count">0</span>/<span id="limit">300</span></span>
+    </div>
+    <div class="error" id="error"></div>
+  </footer>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const chat = $('chat');
+let config = { max_question_chars: 300 };
+let busy = false;
+
+fetch('/api/config').then(r => r.json()).then(c => {
+  config = c;
+  document.title = c.title;
+  $('title').textContent = c.title;
+  $('intro').textContent = c.intro;
+  $('disclaimer').textContent = c.disclaimer;
+  $('q').placeholder = c.placeholder || '输入你的问题';
+  $('limit').textContent = c.max_question_chars;
+}).catch(() => {});
+
+$('anon').value = localStorage.getItem('anon_code') || '';
+$('anon').addEventListener('input', () => {
+  localStorage.setItem('anon_code', $('anon').value.trim());
+});
+
+$('random').addEventListener('click', () => {
+  const code = 'xh-' + Math.random().toString(36).slice(2, 8);
+  $('anon').value = code;
+  localStorage.setItem('anon_code', code);
+});
+
+function addMessage(text, who, meta) {
+  const box = document.createElement('div');
+  box.className = 'msg ' + who;
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.textContent = text;
+  box.appendChild(bubble);
+  if (meta) {
+    const m = document.createElement('div');
+    m.className = 'meta';
+    m.innerHTML = meta;
+    box.appendChild(m);
+  }
+  chat.appendChild(box);
+  chat.scrollTop = chat.scrollHeight;
+  return box;
+}
+
+function showError(text) {
+  const el = $('error');
+  el.textContent = text;
+  el.style.display = text ? 'block' : 'none';
+}
+
+function resize() {
+  const el = $('q');
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 132) + 'px';
+}
+
+$('q').addEventListener('input', () => {
+  $('count').textContent = $('q').value.length;
+  resize();
+});
+
+$('q').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    send();
+  }
+});
+
+$('send').addEventListener('click', send);
+
+async function send() {
+  if (busy) return;
+  const question = $('q').value.trim();
+  const anon = $('anon').value.trim();
+  showError('');
+
+  if (!question) { showError('先写一个问题吧'); return; }
+  if (!/^[A-Za-z0-9_\-]{2,16}$/.test(anon)) {
+    showError('请先填匿名代号（2-16 位字母、数字、下划线或连字符）');
+    $('anon').focus();
+    return;
+  }
+  if (question.length > config.max_question_chars) {
+    showError('问题太长了，请分几次问');
+    return;
+  }
+
+  addMessage(question, 'me');
+  $('q').value = '';
+  $('count').textContent = '0';
+  resize();
+
+  const pending = addMessage('思考中…', 'bot');
+  pending.querySelector('.bubble').classList.add('typing');
+  busy = true;
+  $('send').disabled = true;
+
+  try {
+    const resp = await fetch('/api/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ anon_code: anon, question })
+    });
+    const data = await resp.json();
+    pending.remove();
+
+    if (!resp.ok) {
+      showError(data.detail || '请求失败，请稍后再试');
+      return;
+    }
+
+    const pages = data.citations && data.citations.length
+      ? '第 ' + data.citations.join('、') + ' 页' : '';
+    const tag = data.handoff
+      ? '<span class="tag">资料未覆盖</span>'
+      : '<span class="tag">依据课件</span>';
+    const meta = tag + (pages ? ' <span>' + pages + '</span>' : '') +
+                 '<span>' + (data.latency_ms / 1000).toFixed(1) + ' 秒</span>';
+    const box = addMessage(data.answer, 'bot', meta);
+    if (data.handoff) box.classList.add('handoff');
+  } catch (err) {
+    pending.remove();
+    showError('网络好像不太行，请稍后重试');
+  } finally {
+    busy = false;
+    $('send').disabled = false;
+    $('q').focus();
+  }
+}
+</script>
+</body>
+</html>
