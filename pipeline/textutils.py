@@ -151,9 +151,10 @@ def split_sentences(text: str) -> list[str]:
 #: 实测模型经常写「（第25、26页）」「（第25-26页）」，而早期只认「第25页」，
 #: 结果明明引用了正确页码却被判成「一个页码都没写」→ 假转人工。
 _CITATION_BLOCK_RE = re.compile(
-    r"第\s*(\d{1,4}(?:\s*[、,，/~\-—至]\s*\d{1,4})*)\s*页"
+    # 分隔符要覆盖模型实际会写的各种横线：- — – − ~ 至
+    r"第\s*(\d{1,4}(?:\s*[、,，/~\-—–−至]\s*\d{1,4})*)\s*页"
 )
-_CITATION_RANGE_RE = re.compile(r"(\d{1,4})\s*[~\-—至]\s*(\d{1,4})")
+_CITATION_RANGE_RE = re.compile(r"(\d{1,4})\s*[~\-—–−至]\s*(\d{1,4})")
 _CITATION_NUMBER_RE = re.compile(r"\d{1,4}")
 
 #: 区间展开的上限：写「第25-9999页」这种明显是笔误，不要展开成几千个页码

@@ -116,6 +116,31 @@ def _history_block(history: Sequence[dict] | None, *, limit: int = 4) -> str:
     return "之前的对话（只用来理解当前问题，不要重复回答）：\n" + "\n".join(turns) + "\n\n"
 
 
+LEVEL_LABELS = {
+    "weak": "基础较薄弱",
+    "medium": "掌握部分核心概念，仍有薄弱点",
+    "strong": "基础较扎实",
+}
+
+
+def learner_block(level: str = "", weak_points: Sequence[str] | None = None) -> str:
+    """把测评结果翻译成给模型看的「讲解深度」说明。"""
+    parts: list[str] = []
+    label = LEVEL_LABELS.get((level or "").strip(), "")
+    if label:
+        parts.append(f"学生当前水平：{label}。")
+    weak = [str(item).strip() for item in (weak_points or []) if str(item).strip()][:5]
+    if weak:
+        parts.append("已知薄弱点：" + "、".join(weak) + "。")
+    if not parts:
+        return ""
+    parts.append(
+        "讲解深度按这个水平调整：基础薄弱就从直觉和前置概念讲起、少堆公式；"
+        "中等就讲清概念之间的联系和适用条件；基础扎实就给凝练结论和边界，不重复基础。"
+    )
+    return "【学生情况】" + "".join(parts)
+
+
 @dataclass
 class Answer:
     question: str
@@ -224,6 +249,8 @@ def answer_question(
     rerank_client: OpenAICompatClient | None = None,
     session_id: int | None = None,
     history: Sequence[dict] | None = None,
+    level: str = "",
+    weak_points: Sequence[str] | None = None,
 ) -> Answer:
     started = time.perf_counter()
     course = course_id or settings.default_course_id
@@ -231,6 +258,7 @@ def answer_question(
     model_name = generate_client.config.name
     retrieval_query = build_retrieval_query(question, history)
     history_block = _history_block(history)
+    learner = learner_block(level, weak_points)
 
     def finish(answer: Answer) -> Answer:
         answer.latency_ms = int((time.perf_counter() - started) * 1000)
@@ -282,7 +310,7 @@ def answer_question(
         note_extra: str = "",
     ) -> Answer:
         system = settings.prompt("qa_answer_external", "system").format(
-            course_name=course_name, mode_note=note
+            course_name=course_name, mode_note=note, learner_block=learner
         )
         user = settings.prompt("qa_answer_external", "user").format(
             context_block=context_block, question=question
@@ -346,7 +374,9 @@ def answer_question(
     # ---- ② 课件里有依据：正常作答，要求带页码 ----
     if result is not None and result.has_evidence:
         context = build_context(settings, result.hits)
-        system = settings.prompt("qa_answer", "system").format(course_name=course_name)
+        system = settings.prompt("qa_answer", "system").format(
+            course_name=course_name, learner_block=learner
+        )
         user = settings.prompt("qa_answer", "user").format(
             context=context, question=question
         )
@@ -417,10 +447,27 @@ def answer_question(
                 )
             )
 
-        # 检索到了、但回答始终过不了页码校验：不要转人工，换成通用知识作答
+        # 只是「忘了标页码」：内容仍然来自检索到的课件，保留这份回答。
+        # 换成网络搜索反而会丢掉课程依据，得不偿失。
+        if not invalid:
+            return finish(
+                Answer(
+                    question=question,
+                    mode=MODE_KB,
+                    text=text,
+                    citations=[],
+                    citation_valid=False,
+                    hits=result.hits,
+                    top_score=result.top_score,
+                    model=model_name,
+                    note="回答未标注页码，已保留课件内容（引用校验未通过）",
+                )
+            )
+
+        # 引用了不存在的页码：说明模型在编页码，降级到外部作答更安全
         store.record_gap(course, question)
         fallback_reason = (
-            f"课件里有相关内容，但回答没能通过页码校验（越界页码 {invalid} 或没有引用）"
+            f"课件里有相关内容，但回答引用了不存在的页码（{invalid}）"
         )
     elif result is not None:
         # 知识库里确实没有可用依据——这是内容缺口，记下来给补资料用

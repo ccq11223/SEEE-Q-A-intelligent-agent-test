@@ -49,6 +49,8 @@ def create_app(
     )
     app.state.config = app_config
     app.state.limiter = HourlyLimiter(app_config.asks_per_hour_per_ip)
+    #: 测评进行中的状态，只放内存：服务重启后学生重新开始即可
+    app.state.assessments = {}
     app.include_router(router)
 
     # 静态页面挂在最后：先匹配 /api/*，其余都当静态文件

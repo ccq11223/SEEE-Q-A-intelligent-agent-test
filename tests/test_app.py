@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import shutil
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -18,6 +19,8 @@ from app.ratelimit import HourlyLimiter
 from app.services import Services
 from pipeline.store import Hit
 from tests.support import FakeEmbedder, FakeGenerator, FakeModelConfig, FakeStore, make_settings
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class FakeReranker:
@@ -58,6 +61,9 @@ class AppTestCase(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         settings = make_settings(Path(self.tmp.name), **(settings_overrides or {}))
+        bank_target = Path(self.tmp.name) / "config" / "assessment.yaml"
+        bank_target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(PROJECT_ROOT / "config" / "assessment.yaml", bank_target)
         self.generator = FakeGenerator([reply])
         services = Services(
             settings=settings,
@@ -191,6 +197,58 @@ class TestAsk(AppTestCase):
         resp = self.ask(client, "第三个问题")
         self.assertEqual(resp.status_code, 429)
         self.assertIn("频繁", resp.json()["detail"])
+
+
+class TestAssessment(AppTestCase):
+    def test_five_question_flow_ends_with_summary(self) -> None:
+        client = self.build(
+            reply='{"score": 1, "feedback": "答得不错", "weak_point": "无明显薄弱点"}'
+        )
+        start = client.post("/api/assess/start", json={"anon_code": "xh-test"})
+        self.assertEqual(start.status_code, 200)
+        payload = start.json()
+        self.assertEqual(payload["total"], 5)
+        self.assertTrue(payload["question"]["question"])
+
+        for index in range(5):
+            resp = client.post(
+                "/api/assess/answer",
+                json={"anon_code": "xh-test", "answer": "我的理解是这样"},
+            )
+            self.assertEqual(resp.status_code, 200)
+            body = resp.json()
+            self.assertEqual(body["score"], 1)
+            self.assertEqual(body["feedback"], "答得不错")
+            if index < 4:
+                self.assertIsNotNone(body["next"])
+                self.assertIsNone(body["summary"])
+            else:
+                self.assertIsNone(body["next"])
+                self.assertEqual(body["summary"]["score"], 5)
+                self.assertEqual(body["summary"]["level"], "strong")
+
+    def test_answer_before_start_is_rejected(self) -> None:
+        client = self.build()
+        resp = client.post(
+            "/api/assess/answer", json={"anon_code": "xh-test", "answer": "x"}
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("还没开始", resp.json()["detail"])
+
+    def test_learner_level_reaches_system_prompt(self) -> None:
+        client = self.build()
+        resp = client.post(
+            "/api/ask",
+            json={
+                "anon_code": "xh-test",
+                "question": "节点电流定律是什么？",
+                "level": "weak",
+                "weak_points": ["KCL 电流方向"],
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("学生当前水平", self.generator.systems[0])
+        self.assertIn("KCL 电流方向", self.generator.systems[0])
 
     def test_llm_failure_returns_503_without_leaking_details(self) -> None:
         client = self.build(hits=[make_hit()], reply="", rerank_score=0.95)

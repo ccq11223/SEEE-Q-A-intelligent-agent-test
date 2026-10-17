@@ -86,6 +86,10 @@ class TestCitation(unittest.TestCase):
         self.assertEqual(extract_citation_pages("见（第25-26页）。"), [25, 26])
         self.assertEqual(extract_citation_pages("第 30 至 32 页"), [30, 31, 32])
         self.assertEqual(extract_citation_pages("第25~27页"), [25, 26, 27])
+        # 实测模型会用 en dash（–）和数学减号（−）写区间；
+        # 早期只认 ASCII 连字符，导致页码和课件图都丢了
+        self.assertEqual(extract_citation_pages("（第 21–22 页）"), [21, 22])
+        self.assertEqual(extract_citation_pages("第 27−28 页"), [27, 28])
 
     def test_mixed_forms_are_merged_and_deduped(self) -> None:
         text = "（第 25、26 页）……（第 26 页）……（第 41-42 页）"

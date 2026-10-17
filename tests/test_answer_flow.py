@@ -123,12 +123,15 @@ class TestAnswerFlow(unittest.TestCase):
         self.assertEqual(answer.mode, MODE_KB)
         self.assertEqual(answer.citations, [12])
 
-    def test_answer_without_citation_falls_back_to_general(self) -> None:
+    def test_answer_without_citation_keeps_kb_content(self) -> None:
+        # 忘了标页码是格式问题，不该因此丢掉课件依据、改用网络答案
         store = FakeStore([hit(12)])
         generator = FakeGenerator(["这是一个没有任何页码引用的回答。"] * 2)
         answer = self.run_answer(store, generator)
-        self.assertEqual(answer.mode, MODE_GENERAL)
-        self.assertEqual(len(generator.prompts), 3)
+        self.assertEqual(answer.mode, MODE_KB)
+        self.assertFalse(answer.citation_valid)
+        self.assertEqual(len(generator.prompts), 2)
+        self.assertIn("未标注页码", answer.note)
 
     def test_complex_question_is_handed_off_without_calling_models(self) -> None:
         store = FakeStore([hit(12)])

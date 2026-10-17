@@ -123,6 +123,12 @@
   #send:disabled { background: #b8c4d2; cursor: default; }
   .hint { margin: 8px 2px 0; font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; gap: 10px; }
   .error { color: #b3261e; font-size: 13px; margin-top: 8px; display: none; }
+  .actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .actions button {
+    padding: 7px 12px; border: none; border-radius: 8px;
+    background: var(--brand); color: #fff; font: inherit; font-size: 13px; cursor: pointer;
+  }
+  .actions button.ghost { background: #fff; color: var(--muted); border: 1px solid var(--line); }
 
   /* AI 回答的富文本：标题、列表、公式、表格、引用的课件图片 */
   .bot .bubble > :first-child { margin-top: 0; }
@@ -192,6 +198,15 @@ let config = { max_question_chars: 300 };
 let busy = false;
 // 只在浏览器里保留最近几轮，服务端不存；刷新页面即清空
 let history = [];
+// 基础测评状态与测评得出的学习水平
+let assessment = null;
+let learner = null;
+let pendingQuestion = '';
+try {
+  learner = JSON.parse(localStorage.getItem('learner') || 'null');
+} catch (err) {
+  learner = null;
+}
 
 fetch('/api/config').then(r => r.json()).then(c => {
   config = c;
@@ -213,6 +228,10 @@ $('random').addEventListener('click', () => {
   $('anon').value = code;
   localStorage.setItem('anon_code', code);
 });
+
+if (!learner && !localStorage.getItem('assess_skipped')) {
+  addAssessmentCard();
+}
 
 function addMessage(text, who, meta) {
   const box = document.createElement('div');
@@ -255,6 +274,123 @@ function addMessage(text, who, meta) {
   chat.appendChild(box);
   chat.scrollTop = chat.scrollHeight;
   return box;
+}
+
+function addAssessmentCard() {
+  const box = document.createElement('div');
+  box.className = 'msg bot';
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.innerHTML =
+    '<p>我是这门课的答疑助手。正式答疑前，建议先做 <strong>5 道基础概念题</strong>' +
+    '（约 2 分钟）。我会根据你的掌握情况调整讲解深浅，答错不计成绩。</p>';
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+  const start = document.createElement('button');
+  start.type = 'button';
+  start.textContent = '开始 5 题测评';
+  start.addEventListener('click', () => {
+    box.remove();
+    beginAssessment();
+  });
+  const skip = document.createElement('button');
+  skip.type = 'button';
+  skip.className = 'ghost';
+  skip.textContent = '跳过，直接提问';
+  skip.addEventListener('click', () => {
+    box.remove();
+    localStorage.setItem('assess_skipped', '1');
+    addMessage('好的，直接开始答疑。有问题随时问。', 'bot');
+  });
+  actions.appendChild(start);
+  actions.appendChild(skip);
+  bubble.appendChild(actions);
+  box.appendChild(bubble);
+  chat.appendChild(box);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+async function beginAssessment() {
+  const anon = $('anon').value.trim();
+  if (!/^[A-Za-z0-9_\-]{2,16}$/.test(anon)) {
+    showError('请先填匿名代号（2-16 位字母、数字、下划线或连字符）');
+    $('anon').focus();
+    return false;
+  }
+  busy = true;
+  $('send').disabled = true;
+  showError('');
+  try {
+    const resp = await fetch('/api/assess/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ anon_code: anon })
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      showError(data.detail || '测评启动失败，请稍后再试');
+      return false;
+    }
+    assessment = { active: true, index: 1, total: data.total };
+    addMessage(data.intro, 'bot', { level: 'kb', tag: '基础测评' });
+    addMessage(
+      `第 1/${data.total} 题：${data.question.question}`,
+      'bot',
+      { level: 'kb', tag: data.question.chapter || '基础概念' }
+    );
+    return true;
+  } catch (err) {
+    showError('网络好像不太行，请稍后重试');
+    return false;
+  } finally {
+    busy = false;
+    $('send').disabled = false;
+    $('q').focus();
+  }
+}
+
+function handleAssessmentAnswer(data) {
+  const verdict = data.score === 1 ? '答对了' : (data.score === 0.5 ? '部分正确' : '这题还没答对');
+  addMessage(
+    `${verdict}（${data.score} 分）。${data.feedback || ''}`,
+    'bot',
+    { level: data.score >= 0.5 ? 'kb' : 'general', tag: `第 ${data.index}/${data.total} 题` }
+  );
+
+  if (data.next) {
+    addMessage(
+      `第 ${data.next.index}/${data.next.total} 题：${data.next.question}`,
+      'bot',
+      { level: 'kb', tag: data.next.chapter || '基础概念' }
+    );
+    return;
+  }
+
+  const summary = data.summary || {};
+  const text = [
+    `测评完成：**${summary.score} / ${summary.max_score} 分**，${summary.level_label || ''}。`,
+    '',
+    summary.strengths || '',
+    summary.weak_points || '',
+    '',
+    '后面的讲解会按这个水平调整，可以随时继续追问。'
+  ].join('\n');
+  addMessage(text, 'bot', { level: 'kb', tag: '测评结果' });
+  learner = {
+    level: summary.level || '',
+    weak_points: summary.weak_point_list || []
+  };
+  localStorage.setItem('learner', JSON.stringify(learner));
+  assessment = null;
+
+  if (pendingQuestion) {
+    const question = pendingQuestion;
+    pendingQuestion = '';
+    $('q').value = question;
+    $('count').textContent = String(question.length);
+    resize();
+    setTimeout(send, 200);
+  }
 }
 
 function showError(text) {
@@ -300,6 +436,16 @@ async function send() {
     return;
   }
 
+  // 还没测评也没跳过：先做测评，刚才的问题记下来，测评完自动接着回答
+  if (!assessment && !learner && !localStorage.getItem('assess_skipped')) {
+    pendingQuestion = question;
+    $('q').value = '';
+    $('count').textContent = '0';
+    resize();
+    await beginAssessment();
+    return;
+  }
+
   addMessage(question, 'me');
   $('q').value = '';
   $('count').textContent = '0';
@@ -311,16 +457,38 @@ async function send() {
   $('send').disabled = true;
 
   try {
-    const resp = await fetch('/api/ask', {
+    const answeringAssessment = Boolean(assessment && assessment.active);
+    const endpoint = answeringAssessment ? '/api/assess/answer' : '/api/ask';
+    const body = answeringAssessment
+      ? { anon_code: anon, answer: question }
+      : {
+          anon_code: anon,
+          question: question,
+          history: history.slice(-6),
+          level: learner ? learner.level : '',
+          weak_points: learner ? (learner.weak_points || []) : []
+        };
+    const resp = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ anon_code: anon, question, history: history.slice(-6) })
+      body: JSON.stringify(body)
     });
     const data = await resp.json();
     pending.remove();
 
     if (!resp.ok) {
-      showError(data.detail || '请求失败，请稍后再试');
+      if (answeringAssessment && resp.status === 400) {
+        // 服务重启后内存里的测评状态会丢，让页面回到可重开的状态
+        assessment = null;
+        showError('测评状态已失效，请刷新页面重新开始');
+      } else {
+        showError(data.detail || '请求失败，请稍后再试');
+      }
+      return;
+    }
+
+    if (answeringAssessment) {
+      handleAssessmentAnswer(data);
       return;
     }
 

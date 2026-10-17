@@ -59,7 +59,7 @@
 
   function extractPageNumbers(text) {
     var pages = {};
-    var block = /第\s*(\d{1,4}(?:\s*[、,，/~\-—至]\s*\d{1,4})*)\s*页/g;
+    var block = /第\s*(\d{1,4}(?:\s*[、,，/~\-—–−至]\s*\d{1,4})*)\s*页/g;
     var match;
     while ((match = block.exec(text || ''))) {
       var numbers = match[1].match(/\d{1,4}/g) || [];

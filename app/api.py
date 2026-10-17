@@ -11,6 +11,13 @@ from pydantic import BaseModel
 
 from pipeline import websearch
 from pipeline.answer import answer_question
+from pipeline.assessment import (
+    AssessmentError,
+    grade_answer,
+    load_bank,
+    pick_questions,
+    summarize,
+)
 from pipeline.llm import LLMError
 
 router = APIRouter()
@@ -52,6 +59,18 @@ class AskRequest(BaseModel):
     question: str = ""
     #: 最近几轮对话，由前端带上；服务端不留历史，避免隐私问题
     history: list[ChatTurn] = []
+    #: 测评得出的水平与薄弱点，用来调整讲解深度
+    level: str = ""
+    weak_points: list[str] = []
+
+
+class AssessStartRequest(BaseModel):
+    anon_code: str = ""
+
+
+class AssessAnswerRequest(BaseModel):
+    anon_code: str = ""
+    answer: str = ""
 
 
 class ImageRef(BaseModel):
@@ -169,6 +188,8 @@ def ask(payload: AskRequest, request: Request) -> AskResponse:
             rerank_client=services.rerank,
             session_id=session_id,
             history=history,
+            level=payload.level,
+            weak_points=payload.weak_points[:5],
         )
     except LLMError as exc:
         # 不把模型报错原文甩给学生；日志里能查到
@@ -206,3 +227,101 @@ def ask(payload: AskRequest, request: Request) -> AskResponse:
         latency_ms=result.latency_ms,
         top_score=round(result.top_score, 4),
     )
+
+
+# ---------------------------------------------------------------------------
+# 首次使用的基础测评
+# ---------------------------------------------------------------------------
+
+ASSESS_TOTAL = 5
+
+
+def _question_payload(item, index: int, total: int) -> dict[str, object]:
+    return {
+        "id": item.id,
+        "index": index,
+        "total": total,
+        "question": item.question,
+        "chapter": item.chapter,
+    }
+
+
+@router.post("/api/assess/start")
+def assess_start(payload: AssessStartRequest, request: Request) -> dict[str, object]:
+    anon = payload.anon_code.strip()
+    if not ANON_CODE_RE.match(anon):
+        raise HTTPException(
+            status_code=400,
+            detail="请先填一个匿名代号（2-16 位字母、数字、下划线或连字符）",
+        )
+
+    services = request.app.state.services
+    try:
+        bank = load_bank(services.settings.root)
+    except AssessmentError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    questions = pick_questions(bank, seed=anon, count=ASSESS_TOTAL)
+    request.app.state.assessments[anon] = {
+        "questions": questions,
+        "index": 0,
+        "results": [],
+    }
+    return {
+        "total": len(questions),
+        "question": _question_payload(questions[0], 1, len(questions)),
+        "intro": (
+            "先做 5 道基础概念题，我了解一下你的掌握情况，后面的讲解会更有针对性。"
+            "一次只问一题，答错也没关系，不会计入任何成绩。"
+        ),
+    }
+
+
+@router.post("/api/assess/answer")
+def assess_answer(payload: AssessAnswerRequest, request: Request) -> dict[str, object]:
+    anon = payload.anon_code.strip()
+    answer = payload.answer.strip()
+    if not ANON_CODE_RE.match(anon):
+        raise HTTPException(status_code=400, detail="匿名代号不合法")
+    if not answer:
+        raise HTTPException(status_code=400, detail="先写一下你的想法吧")
+
+    state = request.app.state.assessments.get(anon)
+    if not state:
+        raise HTTPException(status_code=400, detail="测评还没开始，请先点「开始测评」")
+    index = int(state["index"])
+    questions = state["questions"]
+    if index >= len(questions):
+        raise HTTPException(status_code=400, detail="这次测评已经结束了")
+
+    services = request.app.state.services
+    item = questions[index]
+    grade = grade_answer(
+        services.settings,
+        services.generate,
+        item,
+        answer,
+        course_name=services.course_name,
+    )
+    state["results"].append((item, grade))
+    state["index"] = index + 1
+    total = len(questions)
+
+    next_question = None
+    summary = None
+    if state["index"] < total:
+        next_question = _question_payload(
+            questions[state["index"]], state["index"] + 1, total
+        )
+    else:
+        summary = summarize(state["results"])
+        request.app.state.assessments.pop(anon, None)
+
+    return {
+        "score": grade.score,
+        "feedback": grade.feedback,
+        "index": index + 1,
+        "total": total,
+        "next": next_question,
+        "summary": summary,
+    }

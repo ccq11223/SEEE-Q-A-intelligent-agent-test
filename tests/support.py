@@ -80,8 +80,10 @@ class FakeGenerator:
         self.config = FakeModelConfig(name="fake-gen")
         self.replies = list(replies or ["这是一个默认回答（第 1 页）。"])
         self.prompts: list[str] = []
+        self.systems: list[str] = []
 
     def chat(self, *, system: str, user: str, max_tokens: int | None = None) -> str:
+        self.systems.append(system)
         self.prompts.append(user)
         if len(self.replies) > 1:
             return self.replies.pop(0)
@@ -169,10 +171,17 @@ def make_settings(root: Path, **overrides) -> Settings:
             "system": "系统提示",
             "user": "{course_name}/{doc_title}/{page_no}/{page_count}",
         },
-        "qa_answer": {"system": "《{course_name}》助教", "user": "{context}\n---\n{question}"},
+        "qa_answer": {
+            "system": "《{course_name}》助教\n{learner_block}",
+            "user": "{context}\n---\n{question}",
+        },
         "qa_answer_external": {
             "system": "外部作答：{mode_note}",
             "user": "{context_block}\n---\n{question}",
+        },
+        "assessment_grade": {
+            "system": "批改：{course_name}",
+            "user": "{question}|{answer}|{points}|{student_answer}",
         },
         "handoff_message": "这个知识点现有资料里没有覆盖，建议找学长学姐线下确认。",
     }
