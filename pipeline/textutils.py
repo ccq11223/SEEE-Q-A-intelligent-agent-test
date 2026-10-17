@@ -217,17 +217,32 @@ def has_any_citation(answer: str) -> bool:
 
 #: 模型自己声明「资料没覆盖」时的说法。命中它意味着这确实是个知识缺口，
 #: 即使回答里给了相关的其他内容、走了 kb 分支，也必须记进缺口清单。
+#:
+#: 刻意只认**明确指向整体覆盖**的说法，不认「资料里没有提到某个干扰项」——
+#: 实测一道选择题答对了 B，但答案里说了「资料里没有提到 C 选项那种情况」，
+#: 宽泛的匹配把它误记成了知识缺口。
 _NO_COVERAGE_PATTERNS = (
-    "没有覆盖",
+    "现有资料没有覆盖",
+    "现有资料未覆盖",
+    "资料里没有覆盖",
+    "资料没有覆盖",
+    "资料中未覆盖",
     "未覆盖",
-    "没有出现",
-    "没有讲到",
-    "没有提及",
-    "资料里没有",
-    "资料中没有",
+    "资料里没有出现",
+    "资料中没有出现",
+    "资料里没有讲到",
+    "资料里没有提及",
+    "资料中没有提及",
     "现有资料不包含",
-    "没有相关",
+    "没有覆盖",
 )
+
+#: 模型按提示词要求写的显式标记。比猜措辞可靠得多，出现在哪儿都认。
+COVERAGE_MARKER = "【资料未覆盖】"
+
+#: 没有标记时的兜底：只看开头这么多字。「资料没覆盖」这种结论一定写在开头，
+#: 写在后面的通常只是针对某个细节或某个干扰项的说明。
+COVERAGE_HEAD_CHARS = 120
 
 
 def mentions_missing_coverage(answer: str) -> bool:
@@ -238,4 +253,7 @@ def mentions_missing_coverage(answer: str) -> bool:
     并逐条标了页码。这个回答是诚实且有用的，但它走的是「有依据」分支，
     于是这个真实的缺口**没被记进知识缺口清单**，后续就没人去补资料。
     """
-    return any(pattern in answer for pattern in _NO_COVERAGE_PATTERNS)
+    if COVERAGE_MARKER in answer:
+        return True
+    head = answer[:COVERAGE_HEAD_CHARS]
+    return any(pattern in head for pattern in _NO_COVERAGE_PATTERNS)

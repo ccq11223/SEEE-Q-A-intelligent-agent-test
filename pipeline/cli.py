@@ -676,6 +676,7 @@ def cmd_golden(settings: Settings, args: argparse.Namespace) -> int:
 
     def show(result, index: int, total: int) -> None:
         case = result.case
+        form = "选择" if case.is_choice else "问答"
         if case.negative:
             if not result.mode:
                 mark = "未判定（仅检索模式）"
@@ -686,7 +687,7 @@ def cmd_golden(settings: Settings, args: argparse.Namespace) -> int:
             else:
                 mark = "已说明缺口"
             info(
-                f"  [{index}/{total}] {case.id} 负样本 → {mark}"
+                f"  [{index}/{total}] {case.id} 负样本（{form}）→ {mark}"
                 f"（模式 {result.mode or '—'}，最高分 {result.top_score:.3f}）"
             )
         else:
@@ -696,10 +697,17 @@ def cmd_golden(settings: Settings, args: argparse.Namespace) -> int:
                 f"{label}({score:.3f})" for label, score in result.top_hits
             ) or "（没召回任何内容）"
             info(
-                f"  [{index}/{total}] {case.id} 正样本 → 检索{mark}、{front}"
+                f"  [{index}/{total}] {case.id} 正样本（{form}）→ 检索{mark}、{front}"
                 f"（期望第 {case.expect_pages} 页）"
             )
             info(f"        最相关的几条：{shown}")
+            if case.is_choice and result.mode:
+                if result.choice_correct:
+                    info(f"        选择：{result.chosen} ✅")
+                elif result.chosen:
+                    info(f"        选择：{result.chosen} ❌（正确 {case.expected_choice}）")
+                else:
+                    info("        选择：未能从回答里识别出选项")
             if result.note:
                 info(f"        说明：{result.note}")
         if result.error:
@@ -744,8 +752,21 @@ def cmd_golden(settings: Settings, args: argparse.Namespace) -> int:
     info("")
     info(f"检索命中率：{report.hit_rate:.0%}（目标 ≥ {args.min_hit_rate:.0%}）")
     if not args.only_retrieval:
-        info(f"编造率：{report.fabrication_rate:.0%}（目标 ≤ {args.max_fabrication_rate:.0%}）")
-        info(f"回答可用率：{report.answer_rate:.0%}｜负样本转人工率：{report.handoff_rate:.0%}")
+        if report.negative:
+            info(
+                f"编造率：{report.fabrication_rate:.0%}"
+                f"（目标 ≤ {args.max_fabrication_rate:.0%}）"
+            )
+        else:
+            info("编造率：本次没有跑到负样本，未评估")
+        info(f"回答可用率：{report.answer_rate:.0%}")
+        if report.negative:
+            info(f"负样本转人工率：{report.handoff_rate:.0%}")
+        if report.choice_cases:
+            info(
+                f"选择题正确率：{report.choice_accuracy:.0%}"
+                f"（{len(report.choice_cases)} 道）"
+            )
         info(f"要点覆盖率：{report.point_rate:.0%}（低于 60% 就该人工打开回答看）")
     info(f"报告：{report_path}")
 

@@ -143,6 +143,60 @@ class TestAnswerFlow(unittest.TestCase):
         self.run_answer(store, generator)
         self.assertEqual(store.gaps, [])
 
+    def test_mentioning_a_missing_distractor_is_not_a_gap(self) -> None:
+        # 实测：一道选择题答对了 B，但答案里说「资料里没有提到 C 那种情况」，
+        # 宽泛的匹配把它误记成了知识缺口。
+        store = FakeStore([hit(12)])
+        generator = FakeGenerator(
+            [
+                "答案：B\n\n"
+                "直流下电感相当于短路、电容相当于开路（第 12 页）。"
+                "资料里没有提到 C 选项所说的那种频率关系。"
+            ]
+        )
+        answer = self.run_answer(store, generator)
+        self.assertEqual(answer.mode, MODE_KB)
+        self.assertEqual(store.gaps, [])
+
+    def test_gap_stated_late_in_the_answer_is_ignored(self) -> None:
+        store = FakeStore([hit(12)])
+        generator = FakeGenerator(
+            [
+                "根据定义（第 12 页），结论如下。" + "补充说明。" * 100
+                + "另外，现有资料没有覆盖这个扩展问题。"
+            ]
+        )
+        self.run_answer(store, generator)
+        self.assertEqual(store.gaps, [])
+
+    def test_gap_stated_at_the_start_is_still_recorded(self) -> None:
+        store = FakeStore([hit(12)])
+        generator = FakeGenerator(
+            ["**结论**：现有资料没有覆盖回转器，不过资料里有这些滤波器内容（第 12 页）。"]
+        )
+        self.run_answer(store, generator)
+        self.assertEqual(len(store.gaps), 1)
+
+    def test_explicit_marker_counts_even_late_in_the_answer(self) -> None:
+        store = FakeStore([hit(12)])
+        generator = FakeGenerator(
+            [
+                "先说明一下背景（第 12 页）。" + "补充。" * 80
+                + "\n\n【资料未覆盖】这道题涉及的内容课件里没有。"
+            ]
+        )
+        self.run_answer(store, generator)
+        self.assertEqual(len(store.gaps), 1)
+
+    def test_bare_no_coverage_phrase_at_start_counts(self) -> None:
+        # 实测 neg-002 的措辞是「这些内容没有覆盖」，不含「资料」二字
+        store = FakeStore([hit(12)])
+        generator = FakeGenerator(
+            ["结论：非线性电路的小信号分析法，这些内容没有覆盖（第 12 页）。"]
+        )
+        self.run_answer(store, generator)
+        self.assertEqual(len(store.gaps), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

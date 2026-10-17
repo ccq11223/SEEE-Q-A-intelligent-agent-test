@@ -17,7 +17,9 @@ from pipeline.golden import (
     GoldenCase,
     GoldenError,
     GoldenReport,
+    compose_question,
     describe_hits,
+    extract_choice,
     load_cases,
     pages_from_hits,
     point_covered,
@@ -190,6 +192,131 @@ class TestCaseVerdicts(unittest.TestCase):
     def test_retrieval_only_mode_does_not_judge_fabrication(self) -> None:
         # 没调用生成模型，mode 为空，不能拿它判编造
         self.assertFalse(self.negative(mode="").fabricated)
+
+
+CHOICE = {
+    "id": "c1",
+    "question": "下列关于替代定理适用条件的说法，哪一项是错误的？",
+    "negative": False,
+    "expect_pages": [25, 26],
+    "choices": ["必须有唯一解", "不能有电压源回路", "可以出现电流源节点", "应无耦合关系"],
+    "expected_choice": "C",
+}
+
+
+class TestChoiceQuestions(unittest.TestCase):
+    """选择题：唯一正确答案，能机械判分。
+
+    这是整套指标里唯一能可靠发现「结论说错」的形式——问答题只能靠
+    要点覆盖率那种模糊信号，选择题可以直接判对错。
+    """
+
+    def test_extracts_answer_prefix(self) -> None:
+        self.assertEqual(extract_choice("答案：B\n理由如下（第25页）"), "B")
+        self.assertEqual(extract_choice("答案: c"), "C")
+        self.assertEqual(extract_choice("**答案：** D"), "D")
+
+    def test_extracts_inline_phrasings(self) -> None:
+        self.assertEqual(extract_choice("所以应选B，因为……"), "B")
+        self.assertEqual(extract_choice("正确选项是A。"), "A")
+        self.assertEqual(extract_choice("正确的是C"), "C")
+
+    def test_extracts_line_leading_option(self) -> None:
+        self.assertEqual(extract_choice("A. 第一条理由"), "A")
+
+    def test_returns_empty_when_no_option(self) -> None:
+        self.assertEqual(extract_choice("替代定理适用于线性电路（第25页）。"), "")
+
+    def test_does_not_match_letters_inside_words(self) -> None:
+        # ABC 公司、KCL 这类不该被当成选项
+        self.assertEqual(extract_choice("ABC 公司的教材里 KCL 是这样写的"), "")
+
+    def test_compose_question_appends_options(self) -> None:
+        case = load_cases(write_cases([CHOICE]))[0]
+        text = compose_question(case)
+        self.assertIn("A. 必须有唯一解", text)
+        self.assertIn("D. 应无耦合关系", text)
+        self.assertTrue(text.startswith(CHOICE["question"]))
+
+    def test_compose_question_leaves_plain_question_untouched(self) -> None:
+        case = GoldenCase(id="p1", question="替代定理的适用条件？", expect_pages=[1])
+        self.assertEqual(compose_question(case), "替代定理的适用条件？")
+
+    def test_choice_letters_follow_order(self) -> None:
+        case = load_cases(write_cases([CHOICE]))[0]
+        self.assertEqual(case.choice_letters, ["A", "B", "C", "D"])
+        self.assertTrue(case.is_choice)
+
+    def test_too_few_choices_is_rejected(self) -> None:
+        bad = {**CHOICE, "choices": ["只有一个"], "expected_choice": "A"}
+        with self.assertRaises(GoldenError) as ctx:
+            load_cases(write_cases([bad]))
+        self.assertIn("至少", str(ctx.exception))
+
+    def test_out_of_range_answer_is_rejected(self) -> None:
+        bad = {**CHOICE, "expected_choice": "F"}
+        with self.assertRaises(GoldenError) as ctx:
+            load_cases(write_cases([bad]))
+        self.assertIn("expected_choice", str(ctx.exception))
+
+    def test_expected_choice_without_choices_is_rejected(self) -> None:
+        bad = {**CHOICE, "choices": []}
+        with self.assertRaises(GoldenError) as ctx:
+            load_cases(write_cases([bad]))
+        self.assertIn("choices", str(ctx.exception))
+
+    def test_choice_accuracy_metric(self) -> None:
+        case = load_cases(write_cases([CHOICE]))[0]
+        right = CaseResult(case=case, mode="kb", chosen="C", choice_correct=True)
+        wrong = CaseResult(case=case, mode="kb", chosen="A", choice_correct=False)
+        missing = CaseResult(case=case, mode="kb", chosen="", choice_correct=None)
+        self.assertAlmostEqual(GoldenReport(results=[right]).choice_accuracy, 1.0)
+        self.assertAlmostEqual(GoldenReport(results=[wrong]).choice_accuracy, 0.0)
+        self.assertAlmostEqual(
+            GoldenReport(results=[right, wrong]).choice_accuracy, 0.5
+        )
+        # 没答出选项也算错，不能因为「判不了」就当对
+        self.assertAlmostEqual(GoldenReport(results=[missing]).choice_accuracy, 0.0)
+
+    def test_report_lists_wrong_choices(self) -> None:
+        case = load_cases(write_cases([CHOICE]))[0]
+        report = GoldenReport(
+            results=[
+                CaseResult(
+                    case=case,
+                    mode="kb",
+                    chosen="A",
+                    choice_correct=False,
+                    citations=[25],
+                    answer="答案：A\n……",
+                )
+            ]
+        )
+        text = render_report(
+            report,
+            thresholds={"hit_rate": 0.8, "fabrication_rate": 0.05},
+            generated_at="now",
+        )
+        self.assertIn("选择题答错", text)
+        self.assertIn("选了 A，正确是 C", text)
+
+    def test_report_marks_unreadable_choice(self) -> None:
+        case = load_cases(write_cases([CHOICE]))[0]
+        report = GoldenReport(
+            results=[CaseResult(case=case, mode="kb", chosen="", answer="……")]
+        )
+        text = render_report(
+            report,
+            thresholds={"hit_rate": 0.8, "fabrication_rate": 0.05},
+            generated_at="now",
+        )
+        self.assertIn("没能从回答里识别出选项", text)
+
+    def test_negative_choice_is_not_scored_for_correctness(self) -> None:
+        case = GoldenCase(
+            id="n1", question="q", negative=True, choices=["甲", "乙"], expected_choice="A"
+        )
+        self.assertEqual(CaseResult(case=case, mode="kb").choice_rate, 1.0)
 
 
 class TestPointCoverage(unittest.TestCase):

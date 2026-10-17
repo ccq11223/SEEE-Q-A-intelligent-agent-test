@@ -31,6 +31,34 @@ from .textutils import mentions_missing_coverage
 
 VALID_STATUS = ("draft", "ready")
 
+#: 选项字母上限：再多就不像选择题了
+MAX_CHOICES = 6
+
+#: 从回答里抠出模型选的选项字母。
+#: 主要靠提示词要求的第一行「答案：X」；抓不到时再退到「应选X」「正确选项是X」这类说法。
+_CHOICE_PATTERNS = (
+    re.compile(r"答案\s*[:：]\s*\**\s*([A-Fa-f])(?![A-Za-z])"),
+    re.compile(r"(?:应选|选择|选)\s*([A-Fa-f])(?![A-Za-z])"),
+    re.compile(
+        r"正确(?:选项|答案)?\s*(?:的)?\s*(?:是|为|[:：])\s*\**\s*([A-Fa-f])(?![A-Za-z])"
+    ),
+    re.compile(r"^\s*([A-Fa-f])\s*[.、．)）]", re.MULTILINE),
+)
+
+
+def extract_choice(answer: str) -> str:
+    """从自由回答里抠出模型选的选项字母，抠不到返回空串。
+
+    刻意按「答案：X」优先，因为提示词就是这么要求的；
+    其余模式只是兜底。单个字母 A-F 容易和英文缩写撞车，所以每个模式都加了
+    边界断言（前后不能紧挨着英文字母）。
+    """
+    for pattern in _CHOICE_PATTERNS:
+        match = pattern.search(answer)
+        if match:
+            return match.group(1).upper()
+    return ""
+
 #: 比对「要点有没有被答到」时抹掉的符号：空白、标点、LaTeX 与 Markdown 标记。
 #: 学生的回答和题集里写的要点措辞必然不同，不归一化就全是误报。
 _POINT_NORM_RE = re.compile(r"[\s，,。.；;：:!！?？（）()【】\[\]$\\{}\^_*#`~“”\"']+")
@@ -75,6 +103,10 @@ class GoldenCase:
     negative: bool = False
     expect_pages: list[int] = field(default_factory=list)
     expect_points: list[str] = field(default_factory=list)
+    #: 选择题的选项正文，按 A、B、C… 顺序排列。为空表示这是道问答题。
+    choices: list[str] = field(default_factory=list)
+    #: 选择题的正确选项字母（大写）
+    expected_choice: str = ""
     chapter: str = ""
     source_doc: str = ""
     notes: str = ""
@@ -84,6 +116,14 @@ class GoldenCase:
     def scorable(self) -> bool:
         """只有 status=ready 的题参与计分；draft 是待你审核的候选。"""
         return self.status == "ready"
+
+    @property
+    def is_choice(self) -> bool:
+        return bool(self.choices)
+
+    @property
+    def choice_letters(self) -> list[str]:
+        return [chr(ord("A") + index) for index in range(len(self.choices))]
 
 
 def load_cases(path: Path) -> list[GoldenCase]:
@@ -122,6 +162,8 @@ def load_cases(path: Path) -> list[GoldenCase]:
         negative = bool(payload.get("negative", False))
         expect_pages = _int_list(payload.get("expect_pages"), line_no, "expect_pages")
         expect_points = _str_list(payload.get("expect_points"), line_no, "expect_points")
+        choices = _str_list(payload.get("choices"), line_no, "choices")
+        expected_choice = str(payload.get("expected_choice") or "").strip().upper()
         status = str(payload.get("status") or "ready").strip()
         if status not in VALID_STATUS:
             raise GoldenError(
@@ -140,6 +182,27 @@ def load_cases(path: Path) -> list[GoldenCase]:
                 f"否则无法判断检索对不对。还没想好的话把 status 写成 draft"
             )
 
+        # ---- 选择题的额外约束 ----
+        if choices:
+            if len(choices) < 2:
+                raise GoldenError(f"第 {line_no} 行：选择题至少要有 2 个选项")
+            if len(choices) > MAX_CHOICES:
+                raise GoldenError(
+                    f"第 {line_no} 行：选项最多 {MAX_CHOICES} 个，当前 {len(choices)} 个"
+                )
+            if any(not choice.strip() for choice in choices):
+                raise GoldenError(f"第 {line_no} 行：选项内容不能为空")
+            valid_letters = [chr(ord("A") + i) for i in range(len(choices))]
+            if expected_choice not in valid_letters:
+                raise GoldenError(
+                    f"第 {line_no} 行：expected_choice 必须是 "
+                    f"{'/'.join(valid_letters)} 之一，当前是 {expected_choice!r}"
+                )
+        elif expected_choice:
+            raise GoldenError(
+                f"第 {line_no} 行：填了 expected_choice 却没填 choices"
+            )
+
         cases.append(
             GoldenCase(
                 id=case_id,
@@ -147,6 +210,8 @@ def load_cases(path: Path) -> list[GoldenCase]:
                 negative=negative,
                 expect_pages=expect_pages,
                 expect_points=expect_points,
+                choices=choices,
+                expected_choice=expected_choice,
                 chapter=str(payload.get("chapter") or ""),
                 source_doc=str(payload.get("source_doc") or ""),
                 notes=str(payload.get("notes") or ""),
@@ -180,12 +245,28 @@ def summarize_cases(cases: Sequence[GoldenCase]) -> str:
     ready = [case for case in cases if case.scorable]
     positive = [case for case in ready if not case.negative]
     negative = [case for case in ready if case.negative]
+    choice = [case for case in ready if case.is_choice]
     drafts = [case for case in cases if not case.scorable]
     return (
         f"共 {len(cases)} 题：待计分 {len(ready)} 题"
         f"（正样本 {len(positive)}、负样本 {len(negative)}）"
+        f"（其中选择题 {len(choice)} 道）"
         f"，草稿 {len(drafts)} 题"
     )
+
+
+def compose_question(case: GoldenCase) -> str:
+    """把选择题的选项拼进问题里。
+
+    刻意走同一条答疑链（检索→生成→引用校验），不单独做「考试模式」——
+    否则测出来的是另一个系统的行为，跟学生实际用到的东西对不上。
+    """
+    if not case.is_choice:
+        return case.question
+    lines = [case.question, ""]
+    for letter, text in zip(case.choice_letters, case.choices):
+        lines.append(f"{letter}. {text}")
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -207,6 +288,9 @@ class CaseResult:
     #: 期望的结论要点里，回答答到了哪些、漏了哪些
     points_hit: list[str] = field(default_factory=list)
     points_missed: list[str] = field(default_factory=list)
+    #: 选择题：模型选的选项字母（抠不到为空），以及是否答对
+    chosen: str = ""
+    choice_correct: bool | None = None
     mode: str = ""
     citations: list[int] = field(default_factory=list)
     citation_valid: bool = True
@@ -222,6 +306,11 @@ class CaseResult:
         if self.case.negative:
             return False
         return bool(set(self.hit_pages) & set(self.case.expect_pages))
+
+    @property
+    def choice_unreadable(self) -> bool:
+        """选择题没答出可识别的选项字母——可能是没答，也可能是格式没遵守。"""
+        return self.case.is_choice and not self.chosen
 
     @property
     def front_hit(self) -> bool:
@@ -252,6 +341,13 @@ class CaseResult:
         if not total:
             return 1.0
         return len(self.points_hit) / total
+
+    @property
+    def choice_rate(self) -> float:
+        """选择题正确率：答对的比例。没答出可识别选项的算错。"""
+        if not self.case.is_choice or self.case.negative:
+            return 1.0
+        return 1.0 if self.choice_correct else 0.0
 
     @property
     def handed_off(self) -> bool:
@@ -368,6 +464,20 @@ class GoldenReport:
             return 1.0
         return sum(item.point_rate for item in graded) / len(graded)
 
+    @property
+    def choice_cases(self) -> list[CaseResult]:
+        return [
+            item
+            for item in self.results
+            if item.case.is_choice and not item.case.negative
+        ]
+
+    @property
+    def choice_accuracy(self) -> float:
+        if not self.choice_cases:
+            return 1.0
+        return sum(item.choice_rate for item in self.choice_cases) / len(self.choice_cases)
+
 
 def run_case(
     case: GoldenCase,
@@ -381,10 +491,11 @@ def run_case(
     started = time.perf_counter()
     result = CaseResult(case=case)
     front_n = int(settings.retrieval.get("rerank_top_k", 5))
+    asked = compose_question(case)
     try:
         if retrieval_only:
             found: RetrievalResult = retrieve(
-                settings, store, embed_client, case.question
+                settings, store, embed_client, asked
             )
             result.top_score = found.top_score
             result.hit_pages = pages_from_hits(found.hits)
@@ -392,7 +503,7 @@ def run_case(
             result.top_hits = describe_hits(found.hits)
         else:
             answer: Answer = answer_question(
-                settings, store, embed_client, generate_client, case.question
+                settings, store, embed_client, generate_client, asked
             )
             result.top_score = answer.top_score
             result.hit_pages = pages_from_hits(answer.hits)
@@ -403,6 +514,10 @@ def run_case(
             result.citation_valid = answer.citation_valid
             result.answer = answer.text
             result.note = answer.note
+            if case.is_choice and not case.negative:
+                result.chosen = extract_choice(answer.text)
+                if result.chosen:
+                    result.choice_correct = result.chosen == case.expected_choice
             if case.expect_points:
                 answer_key = _norm_point(answer.text)
                 for point in case.expect_points:
@@ -485,10 +600,17 @@ def render_report(
     )
     if not report.retrieval_only:
         lines.append(f"| 回答可用率 | {report.answer_rate:.0%} | 观察项 | — |")
+        if report.choice_cases:
+            lines.append(
+                f"| 选择题正确率 | {report.choice_accuracy:.0%} | 100% | "
+                f"{'✅ 达标' if report.choice_accuracy >= 1.0 else '❌ 有答错'} |"
+            )
         lines.append(
             f"| 要点覆盖率 | {report.point_rate:.0%} | 观察项 | — |"
         )
         lines.append(f"| 负样本转人工率 | {report.handoff_rate:.0%} | 观察项 | — |")
+    if not report.negative:
+        lines.append("> 本次没有跑到负样本，编造率与转人工率不作数。")
     lines.append("")
     lines.extend(
         [
@@ -574,6 +696,29 @@ def render_report(
             )
         lines.append("")
 
+    wrong_choices = [
+        item for item in report.choice_cases if item.choice_correct is not True
+    ]
+    if wrong_choices and not report.retrieval_only:
+        lines.extend(
+            [
+                "## 选择题答错或没答出选项（最需要处理）",
+                "",
+                "选择题有唯一正确答案，这类错误没有解释空间。",
+                "",
+            ]
+        )
+        for item in wrong_choices:
+            if item.chosen:
+                verdict = f"选了 {item.chosen}，正确是 {item.case.expected_choice}"
+            else:
+                verdict = "没能从回答里识别出选项（可能没答，也可能没按格式写「答案：X」）"
+            lines.append(f"### {item.case.id}：{item.case.question}")
+            lines.append("")
+            lines.append(f"- {verdict}｜模式 `{item.mode}`｜引用页码 {item.citations or '（无）'}")
+            lines.append(f"- 回答开头：{item.answer[:200] or '（无回答）'}")
+            lines.append("")
+
     if problems:
         lines.extend(["## 运行出错", ""])
         for item in problems:
@@ -584,8 +729,8 @@ def render_report(
         [
             "## 逐题明细",
             "",
-            "| id | 题型 | 检索命中 | 前置命中 | 模式 | 引用页码 | 最高分 | 前几条命中 |",
-            "| --- | --- | --- | --- | --- | --- | --- | --- |",
+            "| id | 题型 | 格式 | 检索命中 | 前置命中 | 模式 | 选了什么 | 引用页码 | 最高分 |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
         ]
     )
     for item in report.results:
@@ -600,10 +745,18 @@ def render_report(
         citations = "—" if item.case.negative else (
             ",".join(str(page) for page in item.citations) or "（无）"
         )
+        form = "选择" if item.case.is_choice else "问答"
+        if not item.case.is_choice:
+            picked = "—"
+        elif item.choice_correct:
+            picked = f"{item.chosen} ✅"
+        elif item.chosen:
+            picked = f"{item.chosen} ❌（正确 {item.case.expected_choice}）"
+        else:
+            picked = "未识别"
         lines.append(
-            f"| `{item.case.id}` | {kind} | {hit} | {front} | "
-            f"{item.mode or '—'} | {citations} | {item.top_score:.3f} | "
-            f"{_format_top_hits(item)} |"
+            f"| `{item.case.id}` | {kind} | {form} | {hit} | {front} | "
+            f"{item.mode or '—'} | {picked} | {citations} | {item.top_score:.3f} |"
         )
     lines.append("")
 

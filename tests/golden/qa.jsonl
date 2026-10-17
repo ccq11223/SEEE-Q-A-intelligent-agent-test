@@ -12,3 +12,8 @@
 # 负样本示例（资料里根本没有，用来测编造率）
 {"id": "neg-001", "question": "回转器怎么用在有源滤波器设计里？", "negative": true, "chapter": "（资料未覆盖）", "notes": "实测通过：检索最高 0.627，模型如实回答「现有资料没有覆盖回转器」，未编造", "status": "ready"}
 {"id": "neg-002", "question": "非线性电阻电路的小信号分析法怎么做？", "negative": true, "chapter": "（资料未覆盖）", "notes": "第17章内容，课件里没有。跑 --only-retrieval 确认相关度确实低", "status": "ready"}
+#
+# 选择题（有唯一正确答案，能机械判分）
+# 这是唯一能可靠发现「结论说错但页码引用正确」的题型，建议占到题集的 1/4 左右。
+{"id": "choice-001", "question": "下列关于替代定理应用条件的说法，哪一项是错误的？", "negative": false, "choices": ["原电路和替代后的电路都必须有唯一解", "替代后的电路不能有电压源回路", "替代后的电路可以出现电流源节点", "被替代的支路与电路其它部分应无耦合关系"], "expected_choice": "C", "expect_pages": [25, 26], "expect_points": [], "chapter": "第4章 电路定理", "source_doc": "slide-07", "notes": "依据原文第26页：替代后的电路「无电压源回路；无电流源节点（含广义节点）」，故 C 错", "status": "ready"}
+{"id": "choice-002", "question": "关于感抗和容抗随频率的变化，下列哪一项是正确的？", "negative": false, "choices": ["直流下电感相当于开路，电容相当于短路", "直流下电感相当于短路，电容相当于开路", "频率升高时感抗减小，容抗增大", "频率升高时感抗和容抗都增大"], "expected_choice": "B", "expect_pages": [25, 26], "expect_points": [], "chapter": "第10章 正弦稳态电路", "source_doc": "slide-01", "notes": "依据原文：电感 ω=0 时 X_L=0（短路）、ω→∞ 时开路；电容相反", "status": "ready"}
