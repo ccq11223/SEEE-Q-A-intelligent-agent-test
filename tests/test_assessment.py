@@ -102,7 +102,7 @@ class TestGrading(unittest.TestCase):
             ['```json\n{"score": 0.5, "feedback": "方向说反了", "weak_point": "电流方向"}\n```']
         )
         grade = grade_answer(
-            self.settings, client, self.item, "我的回答", course_name="电路理论（上）"
+            self.settings, client, self.item, "我的回答", course_name="电路理论"
         )
         self.assertEqual(grade.score, 0.5)
         self.assertEqual(grade.feedback, "方向说反了")
@@ -111,7 +111,7 @@ class TestGrading(unittest.TestCase):
     def test_bad_json_falls_back_without_blocking(self) -> None:
         client = FakeGenerator(["我判断这道题是对的"])
         grade = grade_answer(
-            self.settings, client, self.item, "我的回答", course_name="电路理论（上）"
+            self.settings, client, self.item, "我的回答", course_name="电路理论"
         )
         self.assertEqual(grade.score, 0.5)
         self.assertTrue(grade.feedback)

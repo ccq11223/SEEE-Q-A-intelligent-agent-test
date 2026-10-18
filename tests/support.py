@@ -114,7 +114,7 @@ class FakeStore(Store):
 def make_settings(root: Path, **overrides) -> Settings:
     """构造一个完全指向临时目录的 Settings，避免污染真实 data/。"""
     pipeline = {
-        "courses": [{"id": "c1", "name": "电路理论（上）", "term": "2026秋"}],
+        "courses": [{"id": "c1", "name": "电路理论", "term": "2026秋"}],
         "default_course_id": "c1",
         "paths": {
             "data_dir": "data",

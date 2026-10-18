@@ -46,7 +46,7 @@ class TestPromptTemplates(unittest.TestCase):
 
     def test_templates_can_be_rendered(self) -> None:
         values = {
-            "course_name": "电路理论（上）",
+            "course_name": "电路理论",
             "learner_block": "",
             "mode_note": "【测试】",
             "context": "材料",

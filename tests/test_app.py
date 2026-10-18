@@ -96,7 +96,7 @@ class TestMetaEndpoints(AppTestCase):
         data = client.get("/api/config").json()
         self.assertEqual(data["title"], "测试课程答疑")
         self.assertEqual(data["max_question_chars"], 20)
-        self.assertEqual(data["course"], "电路理论（上）")
+        self.assertEqual(data["course"], "电路理论")
 
     def test_health(self) -> None:
         client = self.build()

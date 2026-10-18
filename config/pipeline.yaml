@@ -2,7 +2,7 @@
 
 courses:
   - id: circuit-theory-1
-    name: 电路理论（上）
+    name: 电路理论
     term: 2026秋
 
 default_course_id: circuit-theory-1
