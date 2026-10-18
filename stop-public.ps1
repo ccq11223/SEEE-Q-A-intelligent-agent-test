@@ -1,4 +1,4 @@
-# 停止「启动公网服务」拉起的本地服务和隧道。
+﻿# 停止「启动公网服务」拉起的本地服务和隧道。
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $pidFile = Join-Path $root "data\service.pids"

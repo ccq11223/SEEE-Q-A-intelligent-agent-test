@@ -1,4 +1,4 @@
-# 双击「启动公网服务.cmd」会运行这个脚本。
+﻿# 双击「启动公网服务.cmd」会运行这个脚本。
 # 它做三件事：启动本地服务 → 开一条 Cloudflare 临时隧道 → 把公网链接复制到剪贴板。
 
 $ErrorActionPreference = "Stop"
