@@ -13,6 +13,7 @@ from pipeline import websearch
 from pipeline.answer import answer_question
 from pipeline.assessment import (
     AssessmentError,
+    TYPE_LABELS,
     grade_answer,
     load_bank,
     pick_questions,
@@ -243,6 +244,8 @@ def _question_payload(item, index: int, total: int) -> dict[str, object]:
         "total": total,
         "question": item.question,
         "chapter": item.chapter,
+        "type": item.type,
+        "type_label": TYPE_LABELS.get(item.type, ""),
     }
 
 

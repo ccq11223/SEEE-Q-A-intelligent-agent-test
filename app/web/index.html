@@ -336,7 +336,10 @@ async function beginAssessment() {
     addMessage(
       `第 1/${data.total} 题：${data.question.question}`,
       'bot',
-      { level: 'kb', tag: data.question.chapter || '基础概念' }
+      {
+        level: 'kb',
+        tag: [data.question.type_label, data.question.chapter].filter(Boolean).join(' · ') || '基础概念'
+      }
     );
     return true;
   } catch (err) {
@@ -361,21 +364,42 @@ function handleAssessmentAnswer(data) {
     addMessage(
       `第 ${data.next.index}/${data.next.total} 题：${data.next.question}`,
       'bot',
-      { level: 'kb', tag: data.next.chapter || '基础概念' }
+      {
+        level: 'kb',
+        tag: [data.next.type_label, data.next.chapter].filter(Boolean).join(' · ') || '基础概念'
+      }
     );
     return;
   }
 
   const summary = data.summary || {};
-  const text = [
-    `测评完成：**${summary.score} / ${summary.max_score} 分**，${summary.level_label || ''}。`,
+  const report = summary.report_text || [
+    summary.disclaimer || '',
     '',
-    summary.strengths || '',
-    summary.weak_points || '',
-    '',
-    '后面的讲解会按这个水平调整，可以随时继续追问。'
+    `【成绩】${summary.score} / ${summary.max_score}（${summary.level_label || ''}）`,
+    `【答对】${(summary.correct_ids || []).join('、') || '无'}`,
+    `【答错】${(summary.wrong_ids || []).join('、') || '无'}`,
+    `【薄弱章节】${(summary.weak_chapters || []).join('；') || '无'}`,
+    `【优先复习】${(summary.review_points || []).join('；') || '无'}`,
+    `【给辅导学长】${summary.tutor_note || ''}`
   ].join('\n');
-  addMessage(text, 'bot', { level: 'kb', tag: '测评结果' });
+  const box = addMessage(report, 'bot', { level: 'kb', tag: '诊断报告' });
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.textContent = '复制诊断报告';
+  copy.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(report);
+      copy.textContent = '已复制，可发给辅导学长';
+    } catch (err) {
+      copy.textContent = '复制失败，请手动选中文字';
+    }
+  });
+  actions.appendChild(copy);
+  box.appendChild(actions);
+  addMessage('后面的讲解会按这个水平调整，可以随时继续追问。', 'bot');
   learner = {
     level: summary.level || '',
     weak_points: summary.weak_point_list || []
