@@ -1,0 +1,23 @@
+# 可选：配了域名后，用 Caddy 自动申请 HTTPS 证书。
+# 用法：在 .env 里加 DOMAIN=tutor.example.com，然后
+#   docker compose -f docker-compose.yml -f docker-compose.https.yml up -d --build
+services:
+  caddy:
+    image: caddy:2
+    container_name: seeq-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  caddy_data:
+  caddy_config:
