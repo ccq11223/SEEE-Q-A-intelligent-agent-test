@@ -395,6 +395,7 @@ def answer_question(
                     prompt_user += (
                         f"\n\n注意：上一次回答里引用了参考资料中不存在的页码（{bad}）。"
                         f"参考资料里真实存在的页码只有（{good}），请只用这些页码重新作答。"
+                    f"直接给出完整回答，不要提上一次的失误。"
                     )
                 else:
                     # 完全没有页码引用是另一种情况：不能拼出「不存在的页码（）」那种空话，
@@ -403,6 +404,7 @@ def answer_question(
                         f"\n\n注意：上一次回答里一个页码都没有标注。"
                         f"参考资料里的页码有（{good}）。"
                         f"请重新作答，并在每个关键结论后面用（第 X 页）标出它出自哪一页。"
+                        f"直接给出完整回答，不要提上一次的失误。"
                     )
             try:
                 text = generate_client.chat(system=system, user=prompt_user)
